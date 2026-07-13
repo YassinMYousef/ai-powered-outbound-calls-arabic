@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://callcenter:callcenter@localhost:5432/callcenter"
     redis_url: str = "redis://localhost:6379/0"
 
+    # Central logging (Promtail tails this JSONL file and forwards it to Loki).
+    log_level: str = "INFO"
+    log_file: str = "logs/callcenter.jsonl"
+    log_max_bytes: int = 10_485_760
+    log_backup_count: int = 5
+
     # Speech / LLM providers
     openai_api_key: str = ""  # Whisper STT + RAG answer generation
     tts_provider: str = ""    # Arabic neural voice provider — selection pending (Speech module)

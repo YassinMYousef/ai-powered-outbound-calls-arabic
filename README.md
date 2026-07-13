@@ -44,3 +44,9 @@ npm run dev                   # http://localhost:5173, proxies /api → :8000
 ```
 
 See `CLAUDE.md` for architecture details and conventions.
+
+## Sprint 1 operations
+
+The Sprint 1 storage schema is managed with Alembic. After starting PostgreSQL,
+run `cd backend && alembic upgrade head`. Centralized structured logging is provided
+by Grafana + Loki; see [docs/logging.md](docs/logging.md) for setup and verification.

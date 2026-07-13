@@ -3,12 +3,53 @@
 Run locally (from backend/):  uvicorn app.main:app --reload
 Interactive docs at http://localhost:8000/docs
 """
-from fastapi import FastAPI
+import logging
+import time
+from contextlib import asynccontextmanager
+from uuid import uuid4
+
+from fastapi import FastAPI, Request
 
 from app.api import calls, chat, kb, reports
+from app.logging_config import configure_logging, request_id_context
 from app.telephony import webhooks
 
-app = FastAPI(title="CallCenter API", version="0.1.0")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    configure_logging()
+    logger.info("application started")
+    yield
+    logger.info("application stopped")
+
+
+app = FastAPI(title="CallCenter API", version="0.1.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def log_request(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid4()))
+    token = request_id_context.set(request_id)
+    started_at = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("request failed", extra={"method": request.method, "path": request.url.path})
+        raise
+    else:
+        response.headers["X-Request-ID"] = request_id
+        logger.info(
+            "request completed method=%s path=%s status=%s duration_ms=%.2f",
+            request.method,
+            request.url.path,
+            response.status_code,
+            (time.perf_counter() - started_at) * 1000,
+        )
+        return response
+    finally:
+        request_id_context.reset(token)
 
 app.include_router(calls.router, prefix="/api/calls", tags=["calls"])
 app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
