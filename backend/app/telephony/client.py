@@ -1,7 +1,5 @@
-"""Outbound dialing via the telephony provider (Twilio; Vonage was the alternative).
-
-Module: Telephony & Call Orchestration. Keep provider SDK calls behind this
-wrapper so the provider stays swappable. Credentials come from app.config.settings.
+"""Outbound dialing via Twilio.
+Module: Telephony & Call Orchestration. Credentials come from app.config.settings.
 """
 from functools import lru_cache
 from urllib.parse import urlencode
@@ -19,22 +17,27 @@ def _client() -> Client:
 
 
 def place_call(to_number: str, call_id: int) -> str:
-    """Start an outbound call; the provider's webhooks point back at /telephony/*.
-
-    Returns the provider call SID, which is stored on the CallLog row so
-    webhook events can be correlated.
+    """Start an outbound call. Twilio will hit our webhooks at /telephony/voice
+    and /telephony/status once the call connects / ends.
+    Returns the Twilio call SID.
     """
     if not settings.twilio_from_number:
         raise RuntimeError("TWILIO_FROM_NUMBER must be set")
+    if not settings.public_base_url:
+        raise RuntimeError("PUBLIC_BASE_URL must be set (ngrok URL for local testing)")
 
-    # call_id rides on the webhook URLs so handlers can correlate without a SID lookup.
     query = urlencode({"call_id": call_id})
     call = _client().calls.create(
         to=to_number,
         from_=settings.twilio_from_number,
         url=f"{settings.public_base_url}/telephony/voice?{query}",
         status_callback=f"{settings.public_base_url}/telephony/status?{query}",
-        status_callback_event=["completed"],
+        status_callback_event=["initiated", "ringing", "answered", "completed"],
         status_callback_method="POST",
     )
     return call.sid
+
+
+def transfer_to_agent(provider_call_sid: str) -> None:
+    """Placeholder for Sprint 3 — bridges the live call to a human agent."""
+    raise NotImplementedError
