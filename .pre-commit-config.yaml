@@ -1,0 +1,30 @@
+# Pre-commit hooks for the CallCenter repo.
+#
+# One-time setup (per clone; create the backend venv first if missing — see README Quickstart):
+#   cd backend && source .venv/bin/activate && pip install -e ".[dev]" && cd .. && pre-commit install
+#
+# Run against everything: pre-commit run --all-files
+# CI/local lint remains `ruff check app tests` (see .claude/skills/verify) — this
+# config runs the same ruff, matched to the version installed in the venv.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Must match the ruff version installed in backend/.venv (currently 0.15.20).
+    # Bump both together. Ruff picks up backend/pyproject.toml [tool.ruff]
+    # (line-length 100) automatically — do not pass --config.
+    rev: v0.15.20
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        # 2 MB cap: the repo intentionally tracks small .docx/.pdf planning docs,
+        # and audio fixtures may appear later. Anything bigger needs a rethink.
+        args: [--maxkb=2048]
