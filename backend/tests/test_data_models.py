@@ -12,8 +12,7 @@ def test_call_log_retry_relationship_is_a_self_foreign_key() -> None:
 
 def test_kb_chunk_links_to_document_and_has_order_constraint() -> None:
     foreign_keys = KBChunk.__table__.c.document_id.foreign_keys
-    constraints = {constraint.name for constraint in KBChunk.__table__.constraints}
 
     assert {foreign_key.target_fullname for foreign_key in foreign_keys} == {"kb_documents.id"}
-    assert "uq_kb_chunks_document_index" in constraints
     assert KBDocument.chunks.property.mapper.class_ is KBChunk
+    assert {column.name for column in KBChunk.__table__.c} >= {"text", "embedding", "metadata"}

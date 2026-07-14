@@ -64,6 +64,8 @@ class CallLog(Base):
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     transcript: Mapped[str | None] = mapped_column(Text)
     failure_reason: Mapped[str | None] = mapped_column(String(255))
+    # Retained from main's initial schema for existing call-flow compatibility.
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     attempt_number: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -94,11 +96,29 @@ class KBDocument(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
-    source_uri: Mapped[str | None] = mapped_column(String(512))  # original PDF/Wiki location
-    content: Mapped[str | None] = mapped_column(Text)  # extracted text
-    content_hash: Mapped[str | None] = mapped_column(String(64))  # sha256 of content at last embed
-    embedded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # last vector-DB sync
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    source_uri: Mapped[str | None] = mapped_column(String(512))
+    storage_uri: Mapped[str | None] = mapped_column(String(512))
+    source_checksum: Mapped[str | None] = mapped_column(String(64), index=True)
+    mime_type: Mapped[str | None] = mapped_column(String(127))
+    content: Mapped[str | None] = mapped_column(Text)
+    # Retained because the current ingestion pipeline uses it to detect re-embedding work.
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict, server_default="{}")
+    ingestion_status: Mapped[str] = mapped_column(
+        String(16), default="pending", server_default="pending", nullable=False
+    )
+    ingestion_error: Mapped[str | None] = mapped_column(Text)
+    embedded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    chunks: Mapped[list["KBChunk"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan", passive_deletes=True
+    )
 
 
 class KBChunk(Base):
@@ -109,10 +129,33 @@ class KBChunk(Base):
     """
 
     __tablename__ = "kb_chunks"
-    __table_args__ = (UniqueConstraint("document_id", "chunk_index"),)
+    __table_args__ = (
+        CheckConstraint("page_number IS NULL OR page_number > 0", name="ck_kb_chunks_page_positive"),
+        CheckConstraint("token_count IS NULL OR token_count >= 0", name="ck_kb_chunks_token_count_nonnegative"),
+        CheckConstraint(
+            "character_end IS NULL OR character_start IS NULL OR character_end >= character_start",
+            name="ck_kb_chunks_character_range",
+        ),
+        UniqueConstraint("document_id", "chunk_index"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     document_id: Mapped[int] = mapped_column(ForeignKey("kb_documents.id", ondelete="CASCADE"))
     chunk_index: Mapped[int]
+    # `text` and `embedding` are preserved for main's pgvector retrieval implementation.
     text: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM).with_variant(JSON(), "sqlite"))
+    page_number: Mapped[int | None] = mapped_column(Integer)
+    character_start: Mapped[int | None] = mapped_column(Integer)
+    character_end: Mapped[int | None] = mapped_column(Integer)
+    token_count: Mapped[int | None] = mapped_column(Integer)
+    vector_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    document: Mapped[KBDocument] = relationship(back_populates="chunks")
