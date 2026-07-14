@@ -1,0 +1,31 @@
+# CODEOWNERS — GitHub auto-requests review from owners of matched paths.
+# Rules are evaluated top-to-bottom; the LAST matching rule wins, so the
+# default fallback stays at the top and module rules below override it.
+#
+# IMPORTANT: only add a username once it is confirmed to exist — an invalid
+# handle makes GitHub flag/ignore the rule. Unknown owners stay commented out.
+
+# Default fallback: repo owner reviews anything not claimed by a rule below.
+* @YassinMYousef
+
+# --- Module owners (one team member each) ---
+
+# Telephony — Twilio client, /telephony/* webhooks, retry/fallback
+/backend/app/telephony/ @YassinMYousef
+
+# TODO: fill in the real GitHub usernames below, then uncomment the line.
+# Speech — Whisper STT, Arabic TTS, audio conversion
+# /backend/app/speech/ @SPEECH-OWNER-USERNAME
+# Conversation — dialog tree + RAG (ingest/retrieve/answer)
+# /backend/app/conversation/ @CONVERSATION-OWNER-USERNAME
+# Data — SQLAlchemy models, FCR reporting, OAuth2/RBAC
+# /backend/app/data/ @DATA-OWNER-USERNAME
+# Frontend — React/Vite dashboard + chat widget
+# /frontend/ @FRONTEND-OWNER-USERNAME
+
+# --- Shared paths (intentionally unassigned) ---
+# workers/ and api/ are shared surface: reviewed by whichever module owner's
+# change touches them. A pattern with no owner unsets the * fallback so no
+# reviewer is auto-requested here.
+/backend/app/workers/
+/backend/app/api/

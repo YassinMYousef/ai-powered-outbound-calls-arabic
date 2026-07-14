@@ -24,7 +24,7 @@ frontend/   React + Vite dashboard & embeddable chat widget     — Person E
 ## Quickstart
 
 ```bash
-# Infra (Postgres 16 + Redis 7)
+# Infra (Postgres 18 + Redis 7)
 docker compose up -d
 
 # Backend API
@@ -39,7 +39,7 @@ celery -A app.workers.celery_app worker --loglevel=info
 
 # Frontend
 cd frontend
-npm install
+npm ci
 npm run dev                   # http://localhost:5173, proxies /api → :8000
 ```
 

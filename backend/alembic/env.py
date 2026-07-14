@@ -16,12 +16,19 @@ config.set_main_option(
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Tests set the URL programmatically before invoking alembic; otherwise it
+# comes from settings (which reads .env / DATABASE_URL).
+if not config.get_main_option("sqlalchemy.url"):
+    # configparser treats % as interpolation — escape any in the URL (passwords).
+    config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
+    """Render SQL to stdout without a DB connection (alembic upgrade --sql)."""
     context.configure(
-        url=settings.database_url,
+        url=config.get_main_option("sqlalchemy.url"),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
