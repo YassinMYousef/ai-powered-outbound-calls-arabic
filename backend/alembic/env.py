@@ -1,3 +1,4 @@
+"""Alembic environment for the Sprint 1 storage schema."""
 from logging.config import fileConfig
 
 from alembic import context

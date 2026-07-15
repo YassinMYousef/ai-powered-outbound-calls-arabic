@@ -23,9 +23,16 @@ def test_initial_migration_creates_full_schema(tmp_path) -> None:
 
     assert {"call_logs", "kb_documents", "kb_chunks"} <= set(inspector.get_table_names())
     kb_document_columns = {c["name"] for c in inspector.get_columns("kb_documents")}
-    assert {"content_hash", "embedded_at", "content"} <= kb_document_columns
+    assert {
+        "content_hash",
+        "embedded_at",
+        "content",
+        "storage_uri",
+        "metadata",
+        "ingestion_status",
+    } <= kb_document_columns
     kb_chunk_columns = {c["name"] for c in inspector.get_columns("kb_chunks")}
-    assert {"document_id", "chunk_index", "text", "embedding"} <= kb_chunk_columns
+    assert {"document_id", "chunk_index", "text", "embedding", "metadata"} <= kb_chunk_columns
 
 
 def test_migrated_schema_matches_models(tmp_path) -> None:

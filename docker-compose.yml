@@ -19,6 +19,38 @@ services:
     ports:
       - "6379:6379"
 
+  loki:
+    image: grafana/loki:3.1.1
+    command: -config.file=/etc/loki/config.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/config.yml:ro
+      - lokidata:/loki
+
+  promtail:
+    image: grafana/promtail:3.1.1
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    volumes:
+      - ./observability/promtail-config.yml:/etc/promtail/config.yml:ro
+      - ./backend/logs:/var/log/callcenter:ro
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    depends_on:
+      - loki
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+
   tei:
     # Local embedding server (HuggingFace text-embeddings-inference).
     # First start downloads intfloat/multilingual-e5-large (~2.3 GB) into tei_cache.
@@ -31,4 +63,6 @@ services:
 
 volumes:
   pgdata:
+  lokidata:
+  grafanadata:
   tei_cache:
