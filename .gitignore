@@ -232,3 +232,6 @@ frontend/dist/
 
 # Local-only compose overrides (per-developer ports etc.)
 docker-compose.override.yml
+
+# Runtime log files (app/logging_config.py)
+logs/

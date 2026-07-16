@@ -15,18 +15,16 @@ logger = logging.getLogger(__name__)
 def schedule_follow_up_batch() -> None:
     """Fetch customers flagged for follow-up and enqueue one place_outbound_call per customer.
 
-    Sprint 2: pulls rows already sitting in call_logs (outcome IS NULL, attempts == 0).
-    Sprint 4 will replace this with a real CRM API fetch instead.
+    Sprint 2/3: pulls rows sitting in call_logs with status == 'queued' — this covers
+    both brand-new follow-ups and retry rows created by should_retry (Sprint 3), since
+    both start life as 'queued'.
+    Sprint 4 will replace the "already sitting in call_logs" part with a real CRM fetch.
     """
     from app.data.db import SessionLocal
     from app.data.models import CallLog
 
     with SessionLocal() as db:
-        pending = (
-            db.query(CallLog)
-            .filter(CallLog.outcome.is_(None), CallLog.attempts == 0)
-            .all()
-        )
+        pending = db.query(CallLog).filter(CallLog.status == "queued").all()
         for row in pending:
             place_outbound_call.delay(row.id)
         logger.info("schedule_follow_up_batch: enqueued %d call(s)", len(pending))
@@ -35,8 +33,12 @@ def schedule_follow_up_batch() -> None:
 @celery_app.task
 def place_outbound_call(call_id: int) -> None:
     """Dial one customer (telephony.client) and record the attempt.
-    Retries on no-answer/failure per telephony.call_flow.should_retry (added Sprint 3).
+    Retries on no-answer/failure per telephony.call_flow.should_retry (Sprint 3) —
+    a retry creates a NEW CallLog row (parent_call_log_id set, attempt_number + 1),
+    it does not reuse this row, since provider_call_sid is now unique per row.
     """
+    from datetime import UTC, datetime
+
     from app.data.db import SessionLocal
     from app.data.models import CallLog
     from app.telephony.client import place_call
@@ -49,11 +51,12 @@ def place_outbound_call(call_id: int) -> None:
 
         call_sid = place_call(to_number=row.customer_phone, call_id=row.id)
         row.provider_call_sid = call_sid
-        row.attempts += 1
+        row.status = "initiated"
+        row.started_at = datetime.now(UTC)
         db.commit()
         logger.info(
-            "place_outbound_call: call_id=%s dialed, sid=%s, attempt=%d",
-            row.id, call_sid, row.attempts,
+            "place_outbound_call: call_id=%s dialed, sid=%s, attempt_number=%d",
+            row.id, call_sid, row.attempt_number,
         )
 
 
