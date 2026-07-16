@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     # supported country, or a number you own that is verified as an outgoing caller ID.
     twilio_from_number: str = ""
     public_base_url: str = "http://localhost:8000"  # must be reachable by Twilio for webhooks
+    human_agent_number: str = ""
 
     # Auth
     jwt_secret: str = "change-me"

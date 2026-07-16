@@ -38,6 +38,10 @@ def place_call(to_number: str, call_id: int) -> str:
     return call.sid
 
 
-def transfer_to_agent(provider_call_sid: str) -> None:
-    """Placeholder for Sprint 3 — bridges the live call to a human agent."""
-    raise NotImplementedError
+def transfer_to_agent(provider_call_sid: str, to_number: str) -> None:
+    """Redirect a live call to a human agent via <Dial>, replacing its TwiML."""
+    from twilio.twiml.voice_response import VoiceResponse
+
+    twiml = VoiceResponse()
+    twiml.dial(to_number)
+    _client().calls(provider_call_sid).update(twiml=str(twiml))
