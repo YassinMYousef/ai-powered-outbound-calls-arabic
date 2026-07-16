@@ -6,8 +6,11 @@ and be idempotent, because the provider retries on timeout.
 """
 import logging
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
+from sqlalchemy.orm import Session
 from twilio.twiml.voice_response import VoiceResponse
+
+from app.data.db import get_db
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -42,7 +45,7 @@ async def gather(request: Request):
 
 
 @router.post("/status")
-async def status(request: Request) -> Response:
+async def status(request: Request, db: Session = Depends(get_db)) -> Response:
     """Final call status (completed / no-answer / failed) → log outcome, maybe retry."""
     form = await request.form()
     call_sid = form.get("CallSid")
@@ -85,37 +88,35 @@ async def status(request: Request) -> Response:
 
     from datetime import UTC, datetime
 
-    from app.data.db import SessionLocal
     from app.data.models import CallLog
     from app.telephony.call_flow import should_retry
     from app.workers.tasks import place_outbound_call
 
-    with SessionLocal() as db:
-        row = db.get(CallLog, int(call_id))
-        if row is None:
-            logger.error("status webhook: no CallLog row with id=%s", call_id)
-            return Response(status_code=204)
+    row = db.get(CallLog, int(call_id))
+    if row is None:
+        logger.error("status webhook: no CallLog row with id=%s", call_id)
+        return Response(status_code=204)
 
-        row.status = our_status
-        if is_terminal:
-            row.duration_seconds = int(duration) if duration else None
-            row.completed_at = datetime.now(UTC)
+    row.status = our_status
+    if is_terminal:
+        row.duration_seconds = int(duration) if duration else None
+        row.completed_at = datetime.now(UTC)
+    db.commit()
+
+    if is_terminal and should_retry(our_status, row.attempt_number):
+        retry_row = CallLog(
+            customer_phone=row.customer_phone,
+            ticket_id=row.ticket_id,
+            parent_call_log_id=row.id,
+            attempt_number=row.attempt_number + 1,
+            status="queued",
+        )
+        db.add(retry_row)
         db.commit()
-
-        if is_terminal and should_retry(our_status, row.attempt_number):
-            retry_row = CallLog(
-                customer_phone=row.customer_phone,
-                ticket_id=row.ticket_id,
-                parent_call_log_id=row.id,
-                attempt_number=row.attempt_number + 1,
-                status="queued",
-            )
-            db.add(retry_row)
-            db.commit()
-            logger.info(
-                "status webhook: call_id=%s retry queued as call_id=%s (attempt_number=%d)",
-                row.id, retry_row.id, retry_row.attempt_number,
-            )
-            place_outbound_call.delay(retry_row.id)
+        logger.info(
+            "status webhook: call_id=%s retry queued as call_id=%s (attempt_number=%d)",
+            row.id, retry_row.id, retry_row.attempt_number,
+        )
+        place_outbound_call.delay(retry_row.id)
 
     return Response(status_code=204)
