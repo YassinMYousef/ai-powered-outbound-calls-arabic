@@ -1,9 +1,11 @@
 """Outbound dialing via Twilio.
 Module: Telephony & Call Orchestration. Credentials come from app.config.settings.
 """
+import time
 from functools import lru_cache
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
+import httpx
 from twilio.rest import Client
 
 from app.config import settings
@@ -45,3 +47,32 @@ def transfer_to_agent(provider_call_sid: str, to_number: str) -> None:
     twiml = VoiceResponse()
     twiml.dial(to_number)
     _client().calls(provider_call_sid).update(twiml=str(twiml))
+
+
+def fetch_recording_wav(recording_url: str) -> bytes:
+    """Fetch a completed Twilio recording as WAV, retrying its availability race."""
+    parsed = urlparse(recording_url)
+    if parsed.scheme != "https" or parsed.hostname != "api.twilio.com":
+        raise RuntimeError("refusing to fetch recording from a non-Twilio URL")
+
+    url = f"{recording_url}.wav"
+    for attempt in range(2):
+        try:
+            response = httpx.get(
+                url,
+                auth=(settings.twilio_account_sid, settings.twilio_auth_token),
+                timeout=10.0,
+            )
+        except httpx.TransportError as exc:
+            raise RuntimeError(f"Twilio recording fetch failed: {exc}") from exc
+
+        if response.status_code == 200:
+            return response.content
+        if response.status_code == 404 and attempt == 0:
+            time.sleep(0.5)
+            continue
+        raise RuntimeError(
+            f"Twilio recording fetch failed ({response.status_code}): {response.text[:500]}"
+        )
+
+    raise RuntimeError("Twilio recording fetch failed")

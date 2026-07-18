@@ -83,3 +83,34 @@ def test_round_trip_preserves_rate_and_mono() -> None:
 
     # Back to an 8 kHz-length mu-law stream (round-trip through 16 kHz WAV).
     assert abs(len(mulaw_out) - len(mulaw_in)) <= 2
+
+
+def test_wav_to_stt_wav_converts_8k_mono_to_16k_mono() -> None:
+    pcm = b"\x00\x00" * 8000
+
+    converted = audio.wav_to_stt_wav(_make_wav(pcm, rate=8000))
+    meta = _read_wav(converted)
+
+    assert meta["channels"] == 1
+    assert meta["width"] == 2
+    assert meta["rate"] == 16000
+    assert meta["frames"]
+
+
+def test_wav_to_stt_wav_normalizes_44k_stereo() -> None:
+    stereo_pcm = b"\x00\x00\x10\x00" * 4410
+
+    converted = audio.wav_to_stt_wav(
+        _make_wav(stereo_pcm, channels=2, width=2, rate=44100)
+    )
+    meta = _read_wav(converted)
+
+    assert meta["channels"] == 1
+    assert meta["width"] == 2
+    assert meta["rate"] == 16000
+    assert meta["frames"]
+
+
+def test_wav_to_stt_wav_empty_raises() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        audio.wav_to_stt_wav(b"")

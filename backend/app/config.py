@@ -26,7 +26,21 @@ class Settings(BaseSettings):
     # stt_prompt_ar seeds the model with in-domain Egyptian spelling/terms to bias
     # decoding (Whisper's `prompt` is a soft hint, capped at ~224 tokens).
     stt_model: str = "whisper-1"  # or gpt-4o-transcribe / gpt-4o-mini-transcribe
-    stt_prompt_ar: str = ""
+    # Default seeds decoding with the exact yes/no/uncertain/agent vocabulary
+    # dialog.classify_intent matches on, in both Egyptian and MSA spellings.
+    stt_prompt_ar: str = (
+        "مكالمة متابعة من خدمة العملاء. "
+        "أيوه تمام، نعم تم حل المشكلة، اتحلت المشكلة، خلاص عملتها، "
+        "لا لسه معملتش، لأ المشكلة لسه موجودة، "
+        "مش متأكد، غير متأكد، مش عارف، "
+        "عايز أكلم موظف، أريد التحدث مع ممثل خدمة العملاء."
+    )
+    # Hallucination gate (whisper-1 only — needs verbose_json segments). Whisper
+    # invents fluent Arabic over silence/noise; a segment is kept only if
+    # no_speech_prob <= max AND avg_logprob >= min. Thresholds are the ones the
+    # reference OpenAI implementation uses for its silence heuristic.
+    stt_no_speech_prob_max: float = 0.6
+    stt_avg_logprob_min: float = -1.0
 
     # TTS (ElevenLabs). SDK-free — calls go through httpx in speech/tts.py so the
     # provider stays swappable behind synthesize().
@@ -79,7 +93,16 @@ class Settings(BaseSettings):
     # supported country, or a number you own that is verified as an outgoing caller ID.
     twilio_from_number: str = ""
     public_base_url: str = "http://localhost:8000"  # must be reachable by Twilio for webhooks
+    # E.164 human-agent transfer target. Empty means apologize and end the call.
     human_agent_number: str = ""
+    # <Record> endpointing: keep recording until the caller goes silent for
+    # record_silence_timeout_seconds; record_max_length_seconds is only the
+    # safety cap for a turn (Twilio hard-stops the recording when it is hit).
+    record_max_length_seconds: int = 30
+    record_silence_timeout_seconds: int = 2
+    # Per-call speech token lifetime and reusable synthesized-audio cache lifetime.
+    telephony_audio_ttl_seconds: int = 600
+    tts_cache_ttl_seconds: int = 86400
 
     # Auth
     jwt_secret: str = "change-me"

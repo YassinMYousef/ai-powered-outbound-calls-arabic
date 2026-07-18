@@ -1,14 +1,16 @@
 # CallCenter — System Model & Flowcharts
 
-Architecture diagrams for the Arabic AI call-center platform. Diagrams are grounded in the code
-under `backend/app/` as of 2026-07-09 — the repo is an early skeleton, so most boxes describe
-**design intent** (stubs raising `NotImplementedError` / HTTP 501), not working code.
+Architecture diagrams for the Arabic AI call-center platform. These describe the **target design** —
+some boxes are still stubs (`NotImplementedError` / HTTP 501).
+
+> **For what is built today — module by module, with the gaps called out — read
+> [implementation.md](implementation.md).** Where the two disagree, implementation.md wins.
 
 **Status legend used below**
 
 | Marker | Meaning |
 |---|---|
-| ✅ | Implemented: `/health`, `telephony/client.place_call`, `POST /telephony/voice`, `POST /telephony/status` |
+| ✅ | Implemented — see [implementation.md §1](implementation.md#1-status-at-a-glance) for the authoritative, current status table |
 | ⏳ / dashed | Stub — signature and contract exist, body raises `NotImplementedError` or returns 501 |
 
 > GitHub and the VS Code Markdown preview (with Mermaid support) render these blocks as diagrams.

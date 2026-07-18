@@ -7,6 +7,12 @@ Two products sharing one backend:
 
 Requirements: `AI-Powered Outbound Calls (Arabic) (1).docx` · Team/sprint plan: `sprint_plan_visual.pdf`
 
+## Documentation
+
+- **[docs/implementation.md](docs/implementation.md)** — what is built today: module status, the RAG pipeline, the dialog engine, the data model, config, tests, and the known gaps. **Start here.**
+- [docs/architecture.md](docs/architecture.md) — target design: system model, call loop, dialog tree, retry policy, RAG loops (Mermaid; exports in [docs/diagrams/](docs/diagrams/)).
+- [CONTRIBUTING.md](CONTRIBUTING.md) — branching, commits, review, and CI rules (binding).
+
 ## Layout
 
 ```

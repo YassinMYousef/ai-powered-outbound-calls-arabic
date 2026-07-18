@@ -25,6 +25,13 @@ class GreetingContext:
     procedure: str | None = None  # what the customer was asked to do / what was resolved
 
 
+def follow_up_question(ctx: GreetingContext) -> str:
+    """Compose the yes/no follow-up question for `ctx`."""
+    if ctx.procedure:
+        return f"هل تمكّنت من {ctx.procedure.strip()}؟"
+    return "هل تم حل مشكلتك بنجاح؟"
+
+
 def greeting_text(ctx: GreetingContext) -> str:
     """Compose the Arabic greeting + follow-up question for `ctx`.
 
@@ -39,12 +46,7 @@ def greeting_text(ctx: GreetingContext) -> str:
     if ctx.ticket_id:
         intro += f" بخصوص طلبك رقم {ctx.ticket_id.strip()}"
 
-    if ctx.procedure:
-        question = f"هل تمكّنت من {ctx.procedure.strip()}؟"
-    else:
-        question = "هل تم حل مشكلتك بنجاح؟"
-
-    return f"{salutation}، {intro}. {question}"
+    return f"{salutation}، {intro}. {follow_up_question(ctx)}"
 
 
 def render_greeting(ctx: GreetingContext, voice: str | None = None) -> bytes:

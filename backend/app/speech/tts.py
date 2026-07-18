@@ -18,6 +18,7 @@ Two ElevenLabs quality levers are wired in per the call-center requirements:
 Both features need a full model (eleven_multilingual_v2); the low-latency
 turbo/flash models only accept normalization="auto".
 """
+from collections.abc import Iterator
 from functools import lru_cache
 
 import httpx
@@ -96,3 +97,44 @@ def synthesize(text_ar: str, voice: str | None = None) -> bytes:
             f"ElevenLabs TTS failed ({response.status_code}): {response.text[:500]}"
         )
     return response.content
+
+
+def synthesize_stream(text_ar: str, voice: str | None = None) -> Iterator[bytes]:
+    """Stream Arabic speech audio using the same contract as `synthesize`."""
+    if not text_ar or not text_ar.strip():
+        raise ValueError("synthesize_stream() requires non-empty text")
+    if not settings.tts_api_key:
+        raise RuntimeError("TTS_API_KEY (ElevenLabs) is not set — TTS cannot run")
+
+    voice_id = voice or settings.elevenlabs_voice_id
+    body: dict = {
+        "text": text_ar,
+        "model_id": settings.elevenlabs_model_id,
+        "voice_settings": _voice_settings(),
+        "apply_text_normalization": settings.elevenlabs_text_normalization,
+    }
+    locators = _pronunciation_locators()
+    if locators:
+        body["pronunciation_dictionary_locators"] = locators
+
+    def generate() -> Iterator[bytes]:
+        try:
+            with _client().stream(
+                "POST",
+                f"/v1/text-to-speech/{voice_id}/stream",
+                params={"output_format": settings.elevenlabs_output_format},
+                headers={"xi-api-key": settings.tts_api_key, "accept": "audio/*"},
+                json=body,
+            ) as response:
+                if response.status_code != 200:
+                    response.read()
+                    raise RuntimeError(
+                        f"ElevenLabs TTS failed ({response.status_code}): {response.text[:500]}"
+                    )
+                yield from response.iter_bytes()
+        except httpx.TransportError as exc:
+            raise RuntimeError(
+                f"ElevenLabs unreachable at {settings.elevenlabs_base_url}: {exc}"
+            ) from exc
+
+    return generate()

@@ -71,3 +71,32 @@ def wav_to_telephony(wav: bytes) -> bytes:
         frames, _ = audioop.ratecv(frames, _SAMPLE_WIDTH, 1, rate, TELEPHONY_RATE, None)
 
     return audioop.lin2ulaw(frames, _SAMPLE_WIDTH)
+
+
+def wav_to_stt_wav(wav: bytes) -> bytes:
+    """Normalize a PCM WAV to the 16 kHz, 16-bit mono WAV Whisper expects."""
+    if not wav:
+        raise ValueError("wav_to_stt_wav() got empty input")
+
+    with wave.open(io.BytesIO(wav), "rb") as reader:
+        channels = reader.getnchannels()
+        width = reader.getsampwidth()
+        rate = reader.getframerate()
+        frames = reader.readframes(reader.getnframes())
+
+    if width != _SAMPLE_WIDTH:
+        frames = audioop.lin2lin(frames, width, _SAMPLE_WIDTH)
+    if channels == 2:
+        frames = audioop.tomono(frames, _SAMPLE_WIDTH, 0.5, 0.5)
+    elif channels != 1:
+        raise ValueError(f"unsupported channel count: {channels}")
+    if rate != STT_RATE:
+        frames, _ = audioop.ratecv(frames, _SAMPLE_WIDTH, 1, rate, STT_RATE, None)
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(_SAMPLE_WIDTH)
+        output.setframerate(STT_RATE)
+        output.writeframes(frames)
+    return buffer.getvalue()
