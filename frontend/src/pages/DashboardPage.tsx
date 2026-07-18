@@ -1,25 +1,30 @@
 /**
- * FCR dashboard — KPIs from GET /api/reports/kpis (backend/app/api/reports.py).
+ * Quality-manager view — KPIs from GET /api/reports/kpis (backend/app/api/reports.py).
  * Module: Frontend/Dashboard.
  *
- * TODO: fetch KPIs via api() and render charts (recharts is already a dependency):
- *   - FCR rate (target ≥ 90%)
- *   - AI call completion %
- *   - Average handle time vs live-agent baseline
+ * Two sub-pages behind one AppShell: Overview (small insights — the 3 stat
+ * cards) and Details (the same cards for context, plus 14-day trend charts).
+ * Both still read from data/mockReports.ts — Sprint 3 swaps that import for a
+ * real `api<Kpis>('/api/reports/kpis')` call — see docs/frontend-dashboard.md.
  */
-import ChatWidget from '../components/ChatWidget'
+import { useState } from 'react'
+import AppShell from '../components/layout/AppShell'
+import OverviewPage from './OverviewPage'
+import DetailsPage from './DetailsPage'
+
+type View = 'overview' | 'details'
 
 export default function DashboardPage() {
+  const [view, setView] = useState<View>('overview')
+
   return (
-    <main style={{ maxWidth: 960, margin: '0 auto', padding: 24, fontFamily: 'system-ui' }}>
-      <h1>CallCenter Dashboard</h1>
-      <p>KPIs pending — waiting on the reporting API (backend/app/api/reports.py):</p>
-      <ul>
-        <li>FCR rate</li>
-        <li>AI call completion %</li>
-        <li>Average handle time</li>
-      </ul>
-      <ChatWidget />
-    </main>
+    <AppShell
+      tabs={[
+        { label: 'Overview', active: view === 'overview', onClick: () => setView('overview') },
+        { label: 'Details', active: view === 'details', onClick: () => setView('details') },
+      ]}
+    >
+      {view === 'overview' ? <OverviewPage /> : <DetailsPage />}
+    </AppShell>
   )
 }
