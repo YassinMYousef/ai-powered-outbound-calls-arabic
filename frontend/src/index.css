@@ -1,0 +1,54 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Arabic:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap");
+@import "tailwindcss";
+
+/*
+ * Design tokens for the Person E / Frontend-Dashboard module.
+ * Plain CSS variables (not Tailwind `@theme`) so they can be swapped per
+ * color-scheme; consumed via Tailwind arbitrary values, e.g. bg-[var(--surface-card)].
+ * See docs/frontend-dashboard.md for the palette rationale.
+ */
+:root {
+  --surface: #f8fafc;
+  --surface-card: #ffffff;
+  --surface-muted: #f1f5f9;
+  --border-subtle: #e2e8f0;
+  --text-primary: #0f172a;
+  --text-muted: #64748b;
+  --brand: #1e40af;
+  --brand-soft: #3b82f6;
+  --accent: #d97706;
+  --success: #16a34a;
+  --danger: #dc2626;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #0b1220;
+    --surface-card: #111827;
+    --surface-muted: #1e293b;
+    --border-subtle: #1f2937;
+    --text-primary: #e2e8f0;
+    --text-muted: #94a3b8;
+    --brand: #60a5fa;
+    --brand-soft: #3b82f6;
+    --accent: #f59e0b;
+    --success: #22c55e;
+    --danger: #f87171;
+  }
+}
+
+body {
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-arabic {
+  font-family: "Noto Sans Arabic", system-ui, sans-serif;
+}
+
+.font-mono-num {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
