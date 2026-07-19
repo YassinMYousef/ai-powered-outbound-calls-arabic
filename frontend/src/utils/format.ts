@@ -11,3 +11,7 @@ export function formatDuration(seconds: number): string {
 export function formatShortDate(isoDate: string): string {
   return new Date(isoDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
+
+export function formatDateTime(isoDate: string): string {
+  return new Date(isoDate).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
