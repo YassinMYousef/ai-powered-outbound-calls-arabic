@@ -136,19 +136,15 @@ wire this back up to what he built rather than replacing it wholesale:
    key off `user.role`, which will just come from the server instead of the
    login form.
 
-## Call queue (agent, simulated — outside the formal sprint plan)
+## Call queue (agent, mostly simulated + one real control — outside the formal sprint plan)
 
 Requested directly (not in `sprint_plan.md.pdf`): agents should see scheduled
 calls and the queue, and be able to trigger a call with a button. Built as
-`frontend/src/pages/CallQueuePage.tsx`, fully local:
+`frontend/src/pages/CallQueuePage.tsx`:
 
-- **Why it's simulated, not wired up**: there is no list endpoint for calls at
-  all yet; `POST /api/calls/schedule` is an HTTP 501 stub
-  (`backend/app/api/calls.py`); and `telephony.client.place_call` **dials a
-  real, billed call** — CLAUDE.md is explicit that it must never be
-  smoke-tested. Wiring a UI button straight to that would mean any click
-  during review/demo places (and pays for) a real phone call. So "Start call"
-  / "Retry" plays out `queued → initiated → ringing → in_progress →
+- **The table is still simulated mock data** — there's still no `GET` list
+  endpoint for calls, so there's nothing real to populate rows from. "Start
+  call" / "Retry" plays out `queued → initiated → ringing → in_progress →
   completed/no_answer/failed` client-side with a random outcome, using the
   same status values and retry rule as the backend
   (`backend/app/telephony/call_flow.py`'s `MAX_ATTEMPTS = 3` and
@@ -156,7 +152,58 @@ calls and the queue, and be able to trigger a call with a button. Built as
 - **Manual status/outcome override**: once a call is finalized (`completed`,
   `no_answer`, `busy`, `failed`, `cancelled`), the row grows inline `<select>`
   editors so an agent can correct the recorded status/outcome by hand. This is
-  also a local-only mutation — there's no `PATCH`/update endpoint yet either.
+  a local-only mutation — there's no `PATCH`/update endpoint yet either.
+- **`frontend/src/components/PlaceRealCallForm.tsx` is genuinely wired up** —
+  it `POST`s to `/api/calls` (below), which really dials through Twilio. Kept
+  as a visually separate card below the mock table, not a button on a mock
+  row, so a click can never be confused with the simulated ones. It requires
+  a phone number, shows a browser `confirm()` naming the number before
+  sending, and surfaces the created call's id/status or any error inline.
+
+### The new backend endpoint (`backend/app/api/calls.py`)
+
+Person B's `workers/tasks.py` (`place_outbound_call`, `schedule_follow_up_batch`)
+and the `/telephony/*` webhook loop (`voice` → `gather` → dialog → `status`,
+including `CallLog` persistence and retry) were already fully implemented —
+but `api/calls.py`, the HTTP layer the frontend actually calls, was never
+updated to use them; it was still three routes of `HTTPException(501)`. That
+mismatch — not a missing feature — was the actual blocker for "make a call
+through the UI":
+
+- `POST /api/calls` *(new)* — creates a `CallLog` row (`status="queued"`) and
+  enqueues `place_outbound_call` via Celery (`apply_async(..., retry=False)`,
+  same fire-and-forget-if-the-broker's-down pattern as `api/kb.py`'s
+  `_enqueue_ingest`). This is what `PlaceRealCallForm` calls.
+- `POST /api/calls/schedule` *(fixed)* — now actually enqueues
+  `schedule_follow_up_batch` instead of raising 501. Careful with this one
+  manually: it dials **every** `CallLog` row currently at `status="queued"`,
+  not just one.
+- `GET /api/calls/{call_id}` *(fixed)* — now actually reads the `CallLog` row
+  instead of raising 501.
+
+Tests: `backend/tests/test_calls_api.py` (6 cases). The Celery enqueue calls
+are monkeypatched in tests, same pattern as `test_kb_api.py`, so the suite
+never needs Redis or real Twilio credentials.
+
+**Live-verified end-to-end**, not just unit tests: `docker compose up -d`
+(Postgres/Redis/TEI) → `alembic upgrade head` → `uvicorn app.main:app` →
+`celery -A app.workers.celery_app worker --pool=solo` (`--pool=solo` because
+the default prefork pool doesn't work on Windows) → a real call placed from
+`PlaceRealCallForm` to the team's verified test number
+(`HUMAN_AGENT_NUMBER` in `.env`). First attempt landed a `CallLog` row with a
+real Twilio SID but got stuck at `status="initiated"` forever, no
+`duration_seconds`/`completed_at` — root cause was `PUBLIC_BASE_URL`'s ngrok
+tunnel being offline (`ERR_NGROK_3200`), so Twilio could never reach
+`/telephony/voice` or `/telephony/status`. **The tunnel must be running
+(`ngrok http --url=<PUBLIC_BASE_URL's host> 8000`) for any real call to
+resolve past "initiated"** — this isn't specific to the new endpoint, it's
+true of `place_call` generally, but it's easy to miss since the endpoint
+still returns 202 and creates the row either way. With the tunnel up, a
+second call completed correctly: `status="completed"`, `duration_seconds=14`,
+`started_at`/`completed_at` both set, transcript recorded.
+
+TODO(auth): `POST /api/calls` is unauthenticated, same gap already flagged on
+`/api/chat` and `/api/kb` — guard with `data/auth.require_role` once RBAC lands.
 
 ## Agent activity (manager, mock — outside the formal sprint plan)
 
@@ -183,8 +230,8 @@ agent (today `ChatWidget` has no concept of "whose" question it is either).
   pgvector all running, none of which are wired into local dev yet.
 - No real authentication (see Role-based access above) — sign-in is a local
   role picker, not connected to the backend.
-- No real dialing (see Call queue above) — every state change in the queue is
-  a local simulation.
+- The call queue *table* is still simulated (see Call queue above) — only
+  `PlaceRealCallForm`'s single control actually dials.
 - No real agent-activity data (see Agent activity above) — the backend has
   nothing to fetch yet, not just an unimplemented endpoint.
 - No manual dark-mode toggle (see Design system above).

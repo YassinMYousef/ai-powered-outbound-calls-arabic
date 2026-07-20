@@ -1,13 +1,12 @@
 /**
  * Scheduled calls + queue, for the agent role.
  *
- * Entirely local/simulated — see data/mockCalls.ts for why: no list endpoint
- * exists yet, `POST /api/calls/schedule` is a 501 stub, and
- * `telephony.client.place_call` dials a real, billed call, so it must not be
- * wired to a button here before the backend queue (Person B) and a real
- * endpoint exist. "Start call" simulates the status progression client-side;
- * the status/outcome editors on finished calls are local overrides, not a
- * PATCH to anything (there is no update endpoint yet either).
+ * The table below is still local/simulated mock data (data/mockCalls.ts) —
+ * there's still no GET list endpoint, so there's nothing real to populate it
+ * from yet. But POST /api/calls now exists and really dials through Twilio
+ * (backend/app/api/calls.py), so PlaceRealCallForm below the table is wired
+ * to it for real — kept as a visually separate, explicitly confirmed control
+ * so it can never be confused with the mock table's "Start call" buttons.
  */
 import { useState } from 'react'
 import { Loader2, PhoneCall, PhoneOff, ShieldAlert } from 'lucide-react'
@@ -16,6 +15,7 @@ import { MAX_ATTEMPTS, RETRYABLE_STATUSES } from '../types/calls'
 import { STATUS_LABEL, isLive, statusTone } from '../utils/callStatus'
 import { mockCallQueue } from '../data/mockCalls'
 import { formatDateTime } from '../utils/format'
+import PlaceRealCallForm from '../components/PlaceRealCallForm'
 
 const STATUS_TONE_CLASSES: Record<ReturnType<typeof statusTone>, string> = {
   good: 'bg-[var(--success)]/10 text-[var(--success)]',
@@ -74,9 +74,9 @@ export default function CallQueuePage() {
       <div className="mb-4 flex items-start gap-2 rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-3 py-2">
         <ShieldAlert size={15} className="mt-0.5 shrink-0 text-[var(--accent)]" />
         <p className="text-xs leading-snug text-[var(--text-primary)]">
-          Simulated queue — not connected to Twilio. "Start call" plays out a status progression locally; nothing is
-          actually dialed. Real dialing bills a live account (backend/app/telephony/client.py), so this stays mocked
-          until the queue (Person B) and a real endpoint exist.
+          This table is still simulated sample data — there's no list endpoint yet, so "Start call" / "Retry" here
+          just plays out a status progression locally and dials nothing. To place an actual call, use "Place a real
+          call" below, which is genuinely wired to Twilio.
         </p>
       </div>
 
@@ -172,6 +172,10 @@ export default function CallQueuePage() {
             })}
           </tbody>
         </table>
+      </div>
+
+      <div className="mt-4">
+        <PlaceRealCallForm />
       </div>
     </>
   )
