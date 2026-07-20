@@ -25,3 +25,11 @@ export interface QueuedCall {
 /** Mirrors backend/app/telephony/call_flow.py's MAX_ATTEMPTS and retry rule. */
 export const MAX_ATTEMPTS = 3
 export const RETRYABLE_STATUSES: CallStatus[] = ['no_answer', 'busy', 'failed']
+
+/** Response shape of POST /api/calls (backend/app/api/calls.py::create_call). */
+export interface CreateCallResponse {
+  id: number
+  customer_phone: string
+  ticket_id: string | null
+  status: CallStatus
+}

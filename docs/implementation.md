@@ -30,8 +30,12 @@ Grounded in `backend/app/` and `frontend/src/` as of 2026-07-14 (236 tests passi
 | | `schedule_follow_up_batch`, `place_outbound_call`, `generate_fcr_report` | ❌ | Stubs |
 | **api** | `POST /api/chat/query` | ✅ | Cited Arabic answers |
 | | `POST/GET /api/kb/documents` | ✅ | Upload → extract → enqueue embed |
-| | `/api/calls/*`, `/api/reports/*` | ❌ | HTTP 501 |
-| **frontend** | Dashboard + `ChatWidget` | ❌ | Static shells; no API calls wired |
+| | `POST /api/calls`, `POST /api/calls/schedule`, `GET /api/calls/{id}` | ✅ | Create+dial, batch-enqueue, and read — were 501 stubs despite `workers.tasks` already implementing the Celery side; wired up and live-verified (real Twilio call, `CallLog` persisted with duration) 2026-07-20 |
+| | `/api/reports/*` | ❌ | HTTP 501 |
+| **frontend** | Dashboard, `AgentActivityPage` | ❌ | Mock data; no API calls wired |
+| | `ChatWidget` | ❌ | Mock data; no API calls wired |
+| | `CallQueuePage`'s table | ❌ | Mock data; no API calls wired |
+| | `PlaceRealCallForm` | ✅ | Wired to `POST /api/calls` — dials for real |
 
 **Net position.** The **RAG product is functionally complete end-to-end** (upload → embed →
 retrieve → cited answer) and only lacks its UI and auth guard. The **outbound-call product has
@@ -334,8 +338,10 @@ Ordered by risk, not by sprint.
 2. **The call loop is not wired** (§4) — `/gather`, `call_flow`, and `CallLog` persistence.
 3. **No reporting.** `data/reporting.py` is stubs, so the FCR report — the product's headline
    deliverable — has no implementation, and `/api/reports/*` returns 501.
-4. **Frontend is a shell.** Neither the dashboard nor `ChatWidget` calls the API, so the working
-   RAG backend has no user.
+4. **Frontend is mostly a shell.** Neither the dashboard's KPIs nor `ChatWidget` call the API, so
+   the working RAG backend still has no user. The one exception is `PlaceRealCallForm`
+   (`frontend/src/components/`), wired to the now-implemented `POST /api/calls` — see
+   `docs/frontend-dashboard.md`.
 5. **Whisper accuracy is untuned.** `STT_PROMPT_AR` is empty; it should be seeded against real
    Egyptian test-call recordings.
 6. **Scanned Arabic PDFs extract sparsely** — `pypdf` has no OCR. Accepted for now; re-export
