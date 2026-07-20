@@ -78,20 +78,27 @@ default, per the tool's density dial for this product type.
   citation display, suggested-query chips, loading state, RTL/LTR mixed
   layout per the language policy above.
 - `frontend/src/pages/DashboardPage.tsx` — the quality-manager view: an
-  `AppShell` with an Overview/Details tab bar, switching between:
+  `AppShell` with an Overview/Details/Agent Activity tab bar, switching between:
   - `frontend/src/pages/OverviewPage.tsx` — small insights: the 3 stat cards
     only, for a quick glance.
   - `frontend/src/pages/DetailsPage.tsx` — the same stat cards for context,
     plus the 3 trend charts.
-- `frontend/src/pages/AgentConsolePage.tsx` — the agent view: the Knowledge
-  Base Assistant only, one page, no tabs. Split out from `DashboardPage` so
-  each role maps to a whole page rather than a section within one page.
-- `frontend/src/types/reports.ts`, `frontend/src/types/chat.ts` — TypeScript
-  types mirroring the exact backend response shapes (`GET /api/reports/kpis`
-  and `POST /api/chat/query`), so the Sprint 3/4 swap is a drop-in replacement
-  of a data source, not a rewrite.
-- `frontend/src/data/mockReports.ts`, `frontend/src/data/mockChat.ts` — the
-  mock data Sprint 2 explicitly calls for, matching the real contracts above.
+  - `frontend/src/pages/AgentActivityPage.tsx` — see "Agent activity" below.
+- `frontend/src/pages/AgentConsolePage.tsx` — the agent view: an `AppShell`
+  with an Assistant/Call Queue tab bar (same tab pattern as the quality
+  manager's tabs), switching between:
+  - the Knowledge Base Assistant (`ChatWidget`)
+  - `frontend/src/pages/CallQueuePage.tsx` — see "Call queue" below.
+- `frontend/src/types/reports.ts`, `frontend/src/types/chat.ts`,
+  `frontend/src/types/calls.ts`, `frontend/src/types/agentActivity.ts` —
+  TypeScript types mirroring the exact backend shapes where one exists
+  (`GET /api/reports/kpis`, `POST /api/chat/query`, the `CallLog` model's
+  status/outcome check constraints) so later swaps are a drop-in replacement
+  of a data source, not a rewrite; `agentActivity.ts` has no backend
+  counterpart yet (see below).
+- `frontend/src/data/mockReports.ts`, `frontend/src/data/mockChat.ts`,
+  `frontend/src/data/mockCalls.ts`, `frontend/src/data/mockAgentActivity.ts` —
+  the mock data backing each mocked view.
 
 ## Role-based access (mock, pending backend RBAC)
 
@@ -129,6 +136,45 @@ wire this back up to what he built rather than replacing it wholesale:
    key off `user.role`, which will just come from the server instead of the
    login form.
 
+## Call queue (agent, simulated — outside the formal sprint plan)
+
+Requested directly (not in `sprint_plan.md.pdf`): agents should see scheduled
+calls and the queue, and be able to trigger a call with a button. Built as
+`frontend/src/pages/CallQueuePage.tsx`, fully local:
+
+- **Why it's simulated, not wired up**: there is no list endpoint for calls at
+  all yet; `POST /api/calls/schedule` is an HTTP 501 stub
+  (`backend/app/api/calls.py`); and `telephony.client.place_call` **dials a
+  real, billed call** — CLAUDE.md is explicit that it must never be
+  smoke-tested. Wiring a UI button straight to that would mean any click
+  during review/demo places (and pays for) a real phone call. So "Start call"
+  / "Retry" plays out `queued → initiated → ringing → in_progress →
+  completed/no_answer/failed` client-side with a random outcome, using the
+  same status values and retry rule as the backend
+  (`backend/app/telephony/call_flow.py`'s `MAX_ATTEMPTS = 3` and
+  `_RETRYABLE_STATUSES`).
+- **Manual status/outcome override**: once a call is finalized (`completed`,
+  `no_answer`, `busy`, `failed`, `cancelled`), the row grows inline `<select>`
+  editors so an agent can correct the recorded status/outcome by hand. This is
+  also a local-only mutation — there's no `PATCH`/update endpoint yet either.
+
+## Agent activity (manager, mock — outside the formal sprint plan)
+
+Also requested directly: the quality manager should see each agent's progress
+and what they did. Built as `frontend/src/pages/AgentActivityPage.tsx`, a
+third `DashboardPage` tab — a roster table (calls handled, resolved %, KB
+queries asked, last active) plus a per-agent chronological activity feed.
+
+**Why this one has no real-data path yet, unlike the other mocked views**:
+`backend/app/data/models.py`'s `CallLog` has no agent-identity column at all —
+outbound calls are AI-driven, and a human agent only enters the picture via
+`call_flow.transfer_to_agent`, which doesn't persist *who* picked up. So this
+isn't blocked on an unimplemented endpoint the way KPIs/chat/calls are —
+there's no schema to point an endpoint at yet. Surfacing this is itself the
+useful output: before this can go live, `CallLog` (or a new table) needs an
+agent-identity field, and something needs to record KB-query events per
+agent (today `ChatWidget` has no concept of "whose" question it is either).
+
 ## Explicitly mocked / out of scope for this PR
 
 - No live API calls anywhere: `GET /api/reports/kpis` returns HTTP 501 today
@@ -137,6 +183,10 @@ wire this back up to what he built rather than replacing it wholesale:
   pgvector all running, none of which are wired into local dev yet.
 - No real authentication (see Role-based access above) — sign-in is a local
   role picker, not connected to the backend.
+- No real dialing (see Call queue above) — every state change in the queue is
+  a local simulation.
+- No real agent-activity data (see Agent activity above) — the backend has
+  nothing to fetch yet, not just an unimplemented endpoint.
 - No manual dark-mode toggle (see Design system above).
 
 ## Continuing into Sprint 3/4
@@ -152,6 +202,10 @@ wire this back up to what he built rather than replacing it wholesale:
    above, once Person D's backend work lands.
 4. Add integration tests across the full call flow and a chatbot-accuracy test
    suite (Sprint 4 tasks, not yet started).
+5. In `CallQueuePage.tsx`, once Person B's queue and a real `/api/calls` list +
+   schedule endpoint exist, replace `data/mockCalls.ts` and `simulateCall()`
+   with a real fetch + `POST /api/calls/schedule` — and add an explicit
+   confirm step before that call, since it dials (and bills) a real number.
 
 ## Verification
 
