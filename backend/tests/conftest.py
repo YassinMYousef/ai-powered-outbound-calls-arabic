@@ -4,9 +4,25 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import settings
 from app.data.db import get_db
 from app.data.models import Base
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def _query_cache_disabled():
+    """Keep every test hermetic — the RAG query cache touches Redis and Postgres.
+
+    Cache tests re-enable the flag explicitly and fake those dependencies.
+    Restores by hand rather than via the monkeypatch fixture: depending on
+    monkeypatch here would reorder its teardown after per-file autouse fixtures
+    (test_rag_embeddings' _fresh_client breaks on that).
+    """
+    original = settings.rag_query_cache_enabled
+    settings.rag_query_cache_enabled = False
+    yield
+    settings.rag_query_cache_enabled = original
 
 
 @pytest.fixture

@@ -8,8 +8,9 @@
  *
  * TODO(auth): once Person D ships OAuth2/RBAC, replace `login` with a real
  * `POST /api/auth/token` call, derive `user` from the decoded JWT the backend
- * returns, and attach the token to every /api request (see ChatWidget.tsx and
- * DashboardPage.tsx's mock-data TODOs for the call sites that need it).
+ * returns, and call `setAuthToken(jwt)` from api/client.ts (clear it in
+ * `logout`). Every reports/chat/kb/calls request already flows through that one
+ * choke point, so no call site needs to change.
  */
 import { createContext, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'

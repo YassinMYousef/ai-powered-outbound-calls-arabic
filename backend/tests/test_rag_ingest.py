@@ -82,6 +82,27 @@ def test_docs_needing_embedding_change_detection(db_session, fake_embed) -> None
     assert ingest.docs_needing_embedding(db_session) == [doc.id]  # content edited
 
 
+def test_ingest_invalidates_the_query_cache(db_session, fake_embed, monkeypatch) -> None:
+    # A cached chat answer may cite the pre-change KB, so every successful
+    # ingest must flush both cache levels (after commit).
+    calls: list[bool] = []
+    monkeypatch.setattr(ingest.query_cache, "invalidate_all", lambda: calls.append(True))
+
+    doc = _add_doc(db_session, "محتوى المستند")
+    ingest.ingest_document(doc.id, db=db_session)
+
+    assert calls == [True]
+
+
+def test_failed_ingest_does_not_invalidate_the_query_cache(db_session, monkeypatch) -> None:
+    def explode():
+        raise AssertionError("a failed ingest must not flush a still-valid cache")
+
+    monkeypatch.setattr(ingest.query_cache, "invalidate_all", explode)
+    with pytest.raises(ValueError):
+        ingest.ingest_document(999, db=db_session)
+
+
 def test_embed_passages_applies_e5_prefix(monkeypatch) -> None:
     captured: dict = {}
 

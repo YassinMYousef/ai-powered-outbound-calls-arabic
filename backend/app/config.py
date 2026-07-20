@@ -86,6 +86,45 @@ class Settings(BaseSettings):
     # (207 vs 146). "medium" composes cleanly; it is both better and cheaper here.
     answer_effort: str = "medium"
 
+    # RAG query cache — two levels checked before answering: L0 exact-match
+    # (Redis, Arabic-normalized key) and L1 semantic (pgvector, cosine over cached
+    # query embeddings). A hit returns the cached {answer, sources} and skips both
+    # retrieval and generation. Keys include answer_model, so a model change never
+    # serves stale answers; KB ingestion flushes both levels before the TTL does.
+    rag_query_cache_enabled: bool = True
+    rag_query_cache_ttl_seconds: int = 86400
+    # Cosine floor for an L1 hit. e5-large similarities compress into ~0.7–1.0:
+    # same-intent Arabic paraphrases score >=0.95 while related-but-different
+    # questions land ~0.90–0.94. 0.95 favors precision — a wrong cached procedure
+    # to an agent on a live call is worse than a cache miss.
+    rag_query_cache_similarity_threshold: float = 0.95
+
+    # Unanswered-question (KB gap) log. Every chat turn the KB cannot answer is
+    # recorded to unanswered_questions for admins to review and fill — see
+    # data/kb_gaps.py. A gap is one of three coverage verdicts from rag/answer.py:
+    #   no_match       — retrieval returned nothing at all,
+    #   no_citation    — passages were retrieved but the grounded model cited none,
+    #   low_confidence — an answer was cited, but the best passage's raw cosine
+    #                    similarity fell below rag_gap_min_similarity.
+    # RRF-fused retrieval scores can't gate confidence (a strong semantic-only
+    # paraphrase match scores like a weak one), so the low_confidence gate uses the
+    # dense arm's raw cosine — the same signal the query cache trusts. e5 cosine
+    # compresses into ~0.7-1.0; below ~0.80 the best passage is off-topic enough
+    # that a cited answer is more likely a near-miss than real coverage. Conservative
+    # on purpose: a false gap is admin noise, and no_match/no_citation already catch
+    # the clear cases.
+    kb_gap_logging_enabled: bool = True
+    rag_gap_min_similarity: float = 0.80
+
+    # Chat conversation memory. Every turn is persisted per chat_sessions row; only
+    # a bounded window is replayed to the model. Follow-up questions are condensed
+    # into one standalone Arabic query (Haiku-class, cheap) BEFORE hybrid retrieval;
+    # the first turn of a session skips the rewrite entirely.
+    chat_history_max_messages: int = 10  # messages (5 exchanges) sent to the answer prompt
+    rewrite_model: str = "claude-haiku-4-5"
+    rewrite_max_tokens: int = 150  # one rewritten Arabic question, not an essay
+    rewrite_history_max_messages: int = 6  # messages the rewriter sees
+
     # Telephony (Twilio)
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""

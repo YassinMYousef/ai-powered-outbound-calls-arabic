@@ -87,11 +87,12 @@ default, per the tool's density dial for this product type.
   Base Assistant only, one page, no tabs. Split out from `DashboardPage` so
   each role maps to a whole page rather than a section within one page.
 - `frontend/src/types/reports.ts`, `frontend/src/types/chat.ts` — TypeScript
-  types mirroring the exact backend response shapes (`GET /api/reports/kpis`
-  and `POST /api/chat/query`), so the Sprint 3/4 swap is a drop-in replacement
-  of a data source, not a rewrite.
-- `frontend/src/data/mockReports.ts`, `frontend/src/data/mockChat.ts` — the
-  mock data Sprint 2 explicitly calls for, matching the real contracts above.
+  types mirroring the exact backend response shapes (`GET /api/reports/kpis`,
+  `GET /api/reports/trends`, and `POST /api/chat/query`).
+- `frontend/src/hooks/useReports.ts` — fetches KPIs + trends once per
+  `DashboardPage` mount and exposes loading/error/retry state. (The Sprint 2
+  mock files `data/mockReports.ts` / `data/mockChat.ts` were deleted when the
+  real endpoints landed.)
 
 ## Role-based access (mock, pending backend RBAC)
 
@@ -129,28 +130,24 @@ wire this back up to what he built rather than replacing it wholesale:
    key off `user.role`, which will just come from the server instead of the
    login form.
 
-## Explicitly mocked / out of scope for this PR
+## Still mocked / out of scope
 
-- No live API calls anywhere: `GET /api/reports/kpis` returns HTTP 501 today
-  (`backend/app/data/reporting.py` is all `NotImplementedError`), and
-  `POST /api/chat/query` needs `ANTHROPIC_API_KEY` + the TEI embedder +
-  pgvector all running, none of which are wired into local dev yet.
+- The dashboard and chat widget now call the real API (`/api/reports/kpis`,
+  `/api/reports/trends`, `POST /api/chat/query`) with loading/error states.
+  Chat still needs `ANTHROPIC_API_KEY` + the TEI embedder + pgvector running,
+  or the widget shows its error bubble.
 - No real authentication (see Role-based access above) — sign-in is a local
-  role picker, not connected to the backend.
+  role picker, not connected to the backend, and `/api/chat/query` is sent
+  unauthenticated until OAuth2/RBAC lands (`backend/app/api/chat.py`
+  `TODO(auth)`).
 - No manual dark-mode toggle (see Design system above).
 
 ## Continuing into Sprint 3/4
 
-1. In `KpiStatCards.tsx` and `DetailsPage.tsx`, replace the `data/mockReports.ts`
-   imports with `api<Kpis>('/api/reports/kpis')` (see `frontend/src/api/client.ts`)
-   once Person D's reporting pipeline is live.
-2. In `ChatWidget.tsx`, replace `mockAnswer()` with
-   `api<ChatResponse>('/api/chat/query', { method: 'POST', body: JSON.stringify({ query }) })`,
-   including an auth token — not a raw unauthenticated request, per the v2
-   plan's explicit reminder.
-3. Wire real OAuth2/RBAC into `AuthContext` per the Role-based access section
-   above, once Person D's backend work lands.
-4. Add integration tests across the full call flow and a chatbot-accuracy test
+1. Wire real OAuth2/RBAC into `AuthContext` per the Role-based access section
+   above, once Person D's backend work lands, and attach the bearer token to
+   the `ChatWidget` and reports requests.
+2. Add integration tests across the full call flow and a chatbot-accuracy test
    suite (Sprint 4 tasks, not yet started).
 
 ## Verification

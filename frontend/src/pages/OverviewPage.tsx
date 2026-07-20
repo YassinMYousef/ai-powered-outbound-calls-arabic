@@ -1,7 +1,8 @@
 import KpiStatCards from '../components/KpiStatCards'
+import type { Kpis, Trends } from '../types/reports'
 
 /** Small-insights view: the 3 headline KPI cards, nothing else — a quick glance for the quality team. */
-export default function OverviewPage() {
+export default function OverviewPage({ kpis, trends }: { kpis: Kpis; trends: Trends }) {
   return (
     <>
       <div className="mb-6">
@@ -10,7 +11,7 @@ export default function OverviewPage() {
           A quick glance at First Call Resolution and call-handling KPIs. See Details for trends.
         </p>
       </div>
-      <KpiStatCards />
+      <KpiStatCards kpis={kpis} trends={trends} />
     </>
   )
 }

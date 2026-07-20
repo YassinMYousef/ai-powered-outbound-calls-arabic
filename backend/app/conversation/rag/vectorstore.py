@@ -25,6 +25,28 @@ def replace_doc_chunks(
     )
 
 
+def all_chunks(db: Session) -> list[dict]:
+    """Every chunk with its source-document metadata, for in-process BM25 scoring.
+
+    The KB is an internal ops corpus (hundreds of chunks, not millions), so the
+    lexical arm re-reads it per query; revisit with a cached index or a Postgres
+    BM25 extension if it outgrows that.
+    """
+    rows = db.execute(
+        select(KBChunk, KBDocument).join(KBDocument, KBChunk.document_id == KBDocument.id)
+    ).all()
+    return [
+        {
+            "text": chunk.text,
+            "doc_id": doc.id,
+            "title": doc.title,
+            "chunk_index": chunk.chunk_index,
+            "source_uri": doc.source_uri,
+        }
+        for chunk, doc in rows
+    ]
+
+
 def query_chunks(db: Session, embedding: list[float], top_k: int) -> list[dict]:
     """Top-K nearest chunks by cosine distance, joined with their source document."""
     distance = KBChunk.embedding.cosine_distance(embedding)

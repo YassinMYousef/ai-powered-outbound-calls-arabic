@@ -4,8 +4,13 @@ import pytest
 
 from app.config import settings
 from app.conversation.rag import answer as answer_module
-from app.conversation.rag import retrieve
+from app.conversation.rag import embeddings, query_cache, retrieve, rewrite
 from app.conversation.rag.answer import NO_MATCH_AR, REFUSED_AR, answer
+
+HISTORY = [
+    {"role": "user", "content": "كيف أعيد تعيين كلمة مرور العميل؟"},
+    {"role": "assistant", "content": "ادخل إلى النظام واضغط إعادة تعيين."},
+]
 
 CHUNKS = [
     {
@@ -177,6 +182,70 @@ def test_uncited_answer_returns_no_sources(fake_llm) -> None:
     assert answer("سؤال")["sources"] == []
 
 
+# --- conversation history --------------------------------------------------
+
+
+def test_history_threads_before_the_document_turn(fake_llm, monkeypatch) -> None:
+    monkeypatch.setattr(rewrite, "rewrite_query", lambda q, h: q)
+
+    answer("وبعد كده أعمل إيه؟", history=HISTORY)
+    messages = fake_llm.calls[0]["messages"]
+
+    assert len(messages) == 3
+    assert messages[0] == HISTORY[0]  # plain text, oldest first
+    assert messages[1]["role"] == "assistant"
+    # The final turn keeps the exact single-turn shape: documents + question.
+    assert [b["type"] for b in messages[-1]["content"][:-1]] == ["document"] * len(CHUNKS)
+    assert messages[-1]["content"][-1] == {"type": "text", "text": "وبعد كده أعمل إيه؟"}
+
+
+def test_last_history_block_carries_cache_breakpoint(fake_llm, monkeypatch) -> None:
+    # System + history is the stable prefix; marking its tail lets each turn
+    # reuse the previous turn's cache while document blocks churn after it.
+    monkeypatch.setattr(rewrite, "rewrite_query", lambda q, h: q)
+
+    answer("وبعد كده؟", history=HISTORY)
+    messages = fake_llm.calls[0]["messages"]
+
+    assert messages[1]["content"] == [
+        {
+            "type": "text",
+            "text": HISTORY[1]["content"],
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+    assert isinstance(messages[0]["content"], str)  # only the last history block is marked
+
+
+def test_rewritten_query_drives_retrieval_but_not_the_prompt(fake_llm, monkeypatch) -> None:
+    seen: list[str] = []
+    monkeypatch.setattr(rewrite, "rewrite_query", lambda q, h: "كيف أفعّل الشريحة الجديدة؟")
+    monkeypatch.setattr(retrieve, "retrieve", lambda q, k: seen.append(q) or CHUNKS)
+
+    answer("وبعد كده أعمل إيه؟", history=HISTORY)
+
+    assert seen == ["كيف أفعّل الشريحة الجديدة؟"]  # retrieval sees the standalone form
+    final_block = fake_llm.calls[0]["messages"][-1]["content"][-1]
+    assert final_block["text"] == "وبعد كده أعمل إيه؟"  # the model sees the agent's words
+
+
+def test_first_turn_never_calls_rewrite(fake_llm, monkeypatch) -> None:
+    def explode(q, h):
+        raise AssertionError("rewrite must not run without history")
+
+    monkeypatch.setattr(rewrite, "rewrite_query", explode)
+    answer("سؤال")
+    answer("سؤال", history=[])
+    assert len(fake_llm.calls) == 2
+
+
+def test_no_history_request_shape_is_unchanged(fake_llm) -> None:
+    answer("سؤال")
+    messages = fake_llm.calls[0]["messages"]
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+
+
 # --- the paths that must never reach the model ----------------------------
 
 
@@ -206,6 +275,104 @@ def test_top_k_defaults_to_settings_and_is_overridable(monkeypatch) -> None:
     assert seen == [settings.rag_top_k, 3]
 
 
+# --- two-level query cache --------------------------------------------------
+
+CACHED = {"answer": "إجابة مخبأة.", "sources": [{"doc_id": 7, "quotes": ["اقتباس"]}]}
+
+
+def _explode(message: str):
+    def fail(*args, **kwargs):
+        raise AssertionError(message)
+
+    return fail
+
+
+@pytest.fixture
+def cache_on(monkeypatch):
+    """Enable the cache with both levels missing and every seam recorded."""
+    monkeypatch.setattr(settings, "rag_query_cache_enabled", True)
+    seen: dict = {"puts": [], "embed_calls": 0}
+
+    def fake_embed(query):
+        seen["embed_calls"] += 1
+        return [0.1]
+
+    monkeypatch.setattr(embeddings, "embed_query", fake_embed)
+    monkeypatch.setattr(query_cache, "get_exact", lambda q, k: None)
+    monkeypatch.setattr(query_cache, "get_semantic", lambda v, k: None)
+    monkeypatch.setattr(
+        query_cache, "put", lambda q, v, k, r: seen["puts"].append((q, v, k, r))
+    )
+    monkeypatch.setattr(retrieve, "retrieve", lambda q, k, vector=None: CHUNKS)
+    return seen
+
+
+def test_l0_hit_returns_cached_and_touches_nothing_else(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "rag_query_cache_enabled", True)
+    monkeypatch.setattr(query_cache, "get_exact", lambda q, k: CACHED)
+    monkeypatch.setattr(embeddings, "embed_query", _explode("no embedding on an L0 hit"))
+    monkeypatch.setattr(retrieve, "retrieve", _explode("no retrieval on an L0 hit"))
+    monkeypatch.setattr(answer_module, "_client", _explode("no LLM on an L0 hit"))
+
+    assert answer("سؤال") == CACHED
+
+
+def test_l1_hit_abandons_retrieval_result_and_never_calls_the_llm(cache_on, monkeypatch) -> None:
+    monkeypatch.setattr(query_cache, "get_semantic", lambda v, k: CACHED)
+    monkeypatch.setattr(answer_module, "_client", _explode("no LLM on an L1 hit"))
+
+    assert answer("سؤال") == CACHED
+    assert cache_on["puts"] == []  # a replayed answer is never re-cached
+
+
+def test_miss_generates_then_populates_with_post_rewrite_query(
+    fake_llm, cache_on, monkeypatch
+) -> None:
+    fake_llm.state["response"] = _response([_block("نص.", [_citation(0, "اقتباس")])])
+    monkeypatch.setattr(rewrite, "rewrite_query", lambda q, h: "سؤال مستقل")
+
+    result = answer("وبعد كده؟", history=HISTORY)
+
+    assert len(fake_llm.calls) == 1  # generation ran — this was a genuine miss
+    (query, vector, k, cached_result), = cache_on["puts"]
+    assert query == "سؤال مستقل"  # keyed on the standalone form, not the raw follow-up
+    assert vector == [0.1]
+    assert k == settings.rag_top_k
+    assert cached_result == result
+
+
+def test_query_is_embedded_exactly_once_per_miss(fake_llm, cache_on) -> None:
+    # One vector shared by the L1 lookup, retrieval, and the cache write.
+    fake_llm.state["response"] = _response([_block("نص.", [_citation(0, "اقتباس")])])
+    answer("سؤال")
+    assert cache_on["embed_calls"] == 1
+
+
+def test_uncited_answer_is_never_cached(fake_llm, cache_on) -> None:
+    fake_llm.state["response"] = _response([_block("لا توجد معلومات كافية.")])
+    answer("سؤال")
+    assert cache_on["puts"] == []
+
+
+def test_empty_retrieval_is_never_cached(cache_on, monkeypatch) -> None:
+    monkeypatch.setattr(retrieve, "retrieve", lambda q, k, vector=None: [])
+    monkeypatch.setattr(answer_module, "_client", _explode("no LLM without chunks"))
+
+    assert answer("سؤال") == {"answer": NO_MATCH_AR, "sources": []}
+    assert cache_on["puts"] == []
+
+
+def test_disabled_cache_touches_no_cache_seam(fake_llm, monkeypatch) -> None:
+    # The autouse fixture disables the flag: the pre-cache code path must run
+    # without embedding separately or consulting any cache function.
+    monkeypatch.setattr(query_cache, "get_exact", _explode("cache disabled"))
+    monkeypatch.setattr(query_cache, "get_semantic", _explode("cache disabled"))
+    monkeypatch.setattr(query_cache, "put", _explode("cache disabled"))
+    monkeypatch.setattr(embeddings, "embed_query", _explode("retrieve embeds internally"))
+
+    assert answer("سؤال")["answer"] == "إجابة."
+
+
 # --- import safety ---------------------------------------------------------
 
 
@@ -218,5 +385,8 @@ def test_client_requires_a_key_and_import_stays_safe(monkeypatch) -> None:
 
 
 def test_answer_module_uses_shared_retrieve_wrapper() -> None:
-    # Guards the monkeypatch seam and the provider-swap convention.
+    # Guards the monkeypatch seams and the provider-swap convention.
     assert answer_module.retrieve is retrieve
+    assert answer_module.rewrite is rewrite
+    assert answer_module.query_cache is query_cache
+    assert answer_module.embeddings is embeddings

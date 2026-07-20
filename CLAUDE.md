@@ -38,7 +38,7 @@ Monorepo: FastAPI backend (`backend/app/`) + React/Vite dashboard (`frontend/`).
 
 - `app/speech/` — Whisper STT, Arabic TTS (provider not yet selected — all TTS calls stay behind `tts.synthesize`), telephony↔model audio conversion (pydub, needs ffmpeg)
 - `app/telephony/` — Twilio client wrapper, webhook router mounted at `/telephony/*`, retry policy + human-agent fallback (`call_flow.py`)
-- `app/conversation/` — branching dialog tree (`dialog.py`: intents نعم/لا/غير متأكد/agent → actions) and `rag/` (ingest→chunk→embed via the local TEI container into pgvector `kb_chunks`, retrieve top-K, cited answer generation)
+- `app/conversation/` — branching dialog tree (`dialog.py`: intents نعم/لا/غير متأكد/agent → actions) and `rag/` (ingest→chunk→embed via the local TEI container into pgvector `kb_chunks`, hybrid top-K retrieval (pgvector cosine + Arabic-normalized BM25, RRF-fused), cited answer generation)
 - `app/data/` — SQLAlchemy models (`CallLog`, `KBDocument`), FCR/KPI reporting, OAuth2 + RBAC (KB content is proprietary; chat/kb/report endpoints get role-guarded)
 - `app/workers/` — Celery app (Redis broker) + all scheduled/queued work: call batches, retries, nightly KB ingestion, report generation
 - `app/api/` — HTTP surface consumed by the dashboard: `calls`, `reports`, `chat`, `kb`

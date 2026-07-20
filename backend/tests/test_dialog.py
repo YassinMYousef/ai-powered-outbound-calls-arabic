@@ -15,9 +15,17 @@ from app.conversation.dialog import (
 # --- classification -------------------------------------------------------
 
 
-@pytest.mark.parametrize("transcript", ["نعم", "أيوه", "اه تمام"])
+@pytest.mark.parametrize(
+    "transcript",
+    ["نعم", "أيوه", "اه تمام", "اتحلت المشكلة", "المشكلة انحلت", "اتصلحت خلاص"],
+)
 def test_classify_yes_variants(transcript: str) -> None:
     assert classify_intent(transcript) is Intent.YES
+
+
+@pytest.mark.parametrize("transcript", ["لسه ما اتحلتش", "المشكلة ما اتصلحتش"])
+def test_classify_negated_solved_is_no(transcript: str) -> None:
+    assert classify_intent(transcript) is Intent.NO
 
 
 @pytest.mark.parametrize("transcript", ["لا", "لأ", "لسه معملتش"])

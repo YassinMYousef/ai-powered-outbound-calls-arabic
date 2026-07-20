@@ -2,19 +2,22 @@
  * Embeddable Arabic RAG chat widget for the agent desktop.
  * Module: Frontend/Dashboard; backend contract in backend/app/api/chat.py.
  *
- * Sprint 2 scope: UI built on mock data (data/mockChat.ts). Sprint 4 swaps
- * `mockAnswer()` for a real `POST /api/chat/query` call, once Person C's RAG
- * pipeline and Person D's OAuth2/RBAC are both live — see docs/frontend-dashboard.md.
+ * Queries POST /api/chat/query (Person C's RAG pipeline). The endpoint is still
+ * unauthenticated — once Person D's OAuth2/RBAC lands, requests here carry the
+ * bearer token from auth/AuthContext.
  *
- * All UI chrome (labels, buttons, placeholders) is English. Arabic is reserved
- * for what the RAG model itself produces/consumes: the agent's typed query, the
- * generated answer, and literal cited quotes from Arabic KB documents.
+ * All UI chrome (labels, buttons, placeholders, error notices) is English.
+ * Arabic is reserved for what the RAG model itself produces/consumes: the
+ * agent's typed query, the generated answer, and literal cited quotes.
  */
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { BookOpen, Loader2, Send, Sparkles } from 'lucide-react'
+import { ApiError } from '../api/client'
+import { sendChatQuery } from '../api/chat'
 import type { ChatMessage } from '../types/chat'
-import { mockAnswer, SUGGESTED_QUERIES } from '../data/mockChat'
+
+const SUGGESTED_QUERIES = ['كيف أعيد تعيين كلمة مرور العميل؟', 'ما هي سياسة الاسترجاع؟', 'متى أحوّل المكالمة لموظف بشري؟']
 
 let nextId = 0
 const makeId = () => `msg-${++nextId}`
@@ -23,8 +26,11 @@ export default function ChatWidget() {
   const [query, setQuery] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  // Conversation id from the backend; deliberately useState (not sessionStorage) so a
+  // page reload clears the visible transcript and the server-side context together.
+  const [sessionId, setSessionId] = useState<number | null>(null)
 
-  function send(text: string) {
+  async function send(text: string) {
     const trimmed = text.trim()
     if (!trimmed || isLoading) return
 
@@ -32,17 +38,36 @@ export default function ChatWidget() {
     setQuery('')
     setIsLoading(true)
 
-    // Mock latency so the loading state is visible — Sprint 4 replaces this with a real await.
-    setTimeout(() => {
-      const { answer, sources } = mockAnswer(trimmed)
+    try {
+      const { session_id, answer, sources } = await sendChatQuery({
+        query: trimmed,
+        ...(sessionId !== null && { session_id: sessionId }),
+      })
+      setSessionId(session_id)
       setMessages((prev) => [...prev, { id: makeId(), role: 'assistant', text: answer, sources }])
+    } catch (err) {
+      // 404 = the server no longer knows this session; drop it so the next send starts fresh.
+      const sessionExpired = err instanceof ApiError && err.status === 404
+      if (sessionExpired) setSessionId(null)
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId(),
+          role: 'assistant',
+          error: true,
+          text: sessionExpired
+            ? 'انتهت هذه المحادثة. أعد إرسال سؤالك لبدء محادثة جديدة.'
+            : 'The assistant is unavailable. Check that the backend is running and the answer service is configured, then try again.',
+        },
+      ])
+    } finally {
       setIsLoading(false)
-    }, 500)
+    }
   }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    send(query)
+    void send(query)
   }
 
   return (
@@ -53,7 +78,7 @@ export default function ChatWidget() {
         </span>
         <div>
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">Knowledge Base Assistant</h2>
-          <p className="text-xs text-[var(--text-muted)]">Cited Arabic Q&amp;A over the internal KB &middot; mock data</p>
+          <p className="text-xs text-[var(--text-muted)]">Cited Arabic Q&amp;A over the internal KB</p>
         </div>
       </header>
 
@@ -66,7 +91,7 @@ export default function ChatWidget() {
                 <button
                   key={suggestion}
                   type="button"
-                  onClick={() => send(suggestion)}
+                  onClick={() => void send(suggestion)}
                   dir="rtl"
                   className="font-arabic rounded-full border border-[var(--border-subtle)] bg-[var(--surface-muted)] px-3 py-1.5 text-sm text-[var(--text-primary)] transition-colors hover:border-[var(--brand)] hover:text-[var(--brand)]"
                 >
@@ -81,11 +106,13 @@ export default function ChatWidget() {
           <div key={message.id} className={`flex ${message.role === 'agent' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] ${message.role === 'agent' ? '' : 'w-full'}`}>
               <p
-                dir="rtl"
-                className={`font-arabic rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                  message.role === 'agent'
-                    ? 'rounded-tr-sm bg-[var(--brand)] text-white'
-                    : 'rounded-tl-sm bg-[var(--surface-muted)] text-[var(--text-primary)]'
+                dir={message.error ? 'auto' : 'rtl'}
+                className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                  message.error
+                    ? 'rounded-tl-sm border border-[var(--danger)]/30 bg-[var(--danger)]/5 text-[var(--text-primary)]'
+                    : message.role === 'agent'
+                      ? 'font-arabic rounded-tr-sm bg-[var(--brand)] text-white'
+                      : 'font-arabic rounded-tl-sm bg-[var(--surface-muted)] text-[var(--text-primary)]'
                 }`}
               >
                 {message.text}

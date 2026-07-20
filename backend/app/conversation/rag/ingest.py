@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.conversation.rag import chunking, embeddings, vectorstore
+from app.conversation.rag import chunking, embeddings, query_cache, vectorstore
 from app.data.models import KBDocument
 
 
@@ -58,4 +58,7 @@ def ingest_document(doc_id: int, db: Session | None = None) -> int:
     doc.embedded_at = datetime.now(timezone.utc)
     doc.content_hash = content_sha256(doc.content or "")
     db.commit()
+    # After commit (a failed ingest must not flush a still-valid cache): cached
+    # answers may cite the pre-change KB, so both query-cache levels are dropped.
+    query_cache.invalidate_all()
     return len(chunks)

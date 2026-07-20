@@ -9,6 +9,8 @@ export interface ChatSource {
 }
 
 export interface ChatResponse {
+  /** Conversation id — resend it with follow-up questions to keep context. */
+  session_id: number
   answer: string
   sources: ChatSource[]
 }
@@ -18,4 +20,6 @@ export interface ChatMessage {
   role: 'agent' | 'assistant'
   text: string
   sources?: ChatSource[]
+  /** Widget-local: the request failed — `text` is an English error notice, not an answer. */
+  error?: boolean
 }
