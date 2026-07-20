@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request
 
-from app.api import calls, chat, kb, reports
+from app.api import agents, calls, chat, customers, kb, reports
 from app.logging_config import configure_logging, request_id_context
 from app.telephony import webhooks
 
@@ -52,6 +52,8 @@ async def log_request(request: Request, call_next):
         request_id_context.reset(token)
 
 app.include_router(calls.router, prefix="/api/calls", tags=["calls"])
+app.include_router(customers.router, prefix="/api/customers", tags=["customers"])
+app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(kb.router, prefix="/api/kb", tags=["knowledge-base"])

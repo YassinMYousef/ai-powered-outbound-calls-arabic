@@ -1,10 +1,10 @@
 /**
  * Places a REAL, billed outbound call via POST /api/calls (backend/app/api/calls.py),
  * which persists a CallLog row and enqueues telephony.workers.place_outbound_call.
- * Deliberately separate from CallQueuePage's simulated table so a click here can
- * never be confused with the mock "Start call" buttons. Requires an explicit
- * browser confirm() before sending — this is the one control on this page that
- * actually dials a phone and costs money.
+ * For a number that isn't already a CRM customer with a queued row — for an
+ * existing queued row, use the "Start call" button in CallQueuePage's table
+ * instead. Requires an explicit browser confirm() before sending — this
+ * dials a phone and costs money the moment it's used.
  */
 import { useState } from 'react'
 import type { FormEvent } from 'react'
@@ -12,7 +12,11 @@ import { AlertTriangle, PhoneCall } from 'lucide-react'
 import { api } from '../api/client'
 import type { CreateCallResponse } from '../types/calls'
 
-export default function PlaceRealCallForm() {
+interface PlaceRealCallFormProps {
+  onCreated?: () => void
+}
+
+export default function PlaceRealCallForm({ onCreated }: PlaceRealCallFormProps) {
   const [phone, setPhone] = useState('')
   const [ticketId, setTicketId] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -40,6 +44,7 @@ export default function PlaceRealCallForm() {
       setPlaced(result)
       setPhone('')
       setTicketId('')
+      onCreated?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to place the call.')
     } finally {

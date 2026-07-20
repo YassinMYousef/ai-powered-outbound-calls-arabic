@@ -12,16 +12,6 @@ export type CallStatus =
 
 export type CallOutcome = 'resolved' | 'unresolved' | 'transferred' | 'unknown' | null
 
-export interface QueuedCall {
-  id: number
-  customer_phone: string
-  ticket_id: string | null
-  status: CallStatus
-  outcome: CallOutcome
-  attempt_number: number
-  scheduled_at: string // ISO
-}
-
 /** Mirrors backend/app/telephony/call_flow.py's MAX_ATTEMPTS and retry rule. */
 export const MAX_ATTEMPTS = 3
 export const RETRYABLE_STATUSES: CallStatus[] = ['no_answer', 'busy', 'failed']
@@ -32,4 +22,19 @@ export interface CreateCallResponse {
   customer_phone: string
   ticket_id: string | null
   status: CallStatus
+}
+
+/** Mirrors backend/app/api/calls.py's _call_dict — GET /api/calls and GET /api/calls/{id}. */
+export interface CallRecord {
+  id: number
+  customer_id: number | null
+  customer_phone: string
+  ticket_id: string | null
+  status: CallStatus
+  outcome: CallOutcome
+  duration_seconds: number | null
+  transcript: string | null
+  attempt_number: number
+  provider_call_sid: string | null
+  created_at: string // ISO
 }

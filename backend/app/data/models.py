@@ -30,6 +30,53 @@ class Base(DeclarativeBase):
     pass
 
 
+class Customer(Base):
+    """A CRM customer record.
+
+    The requirements doc's architecture diagram has a "[CRM / Inbound Call
+    Records]" box with no real external system behind it — this table is
+    that source of truth for this project: who to follow up with, and why
+    (via `CallLog.ticket_id` on the calls flagged from here).
+    """
+
+    __tablename__ = "customers"
+    __table_args__ = (UniqueConstraint("phone", name="uq_customers_phone"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    phone: Mapped[str] = mapped_column(String(20), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    call_logs: Mapped[list["CallLog"]] = relationship(back_populates="customer")
+
+
+class Agent(Base):
+    """A human agent on the outbound-calling team.
+
+    Not an auth account — backend/app/data/auth.py's OAuth2/RBAC is still
+    unimplemented (NotImplementedError), so this is a roster a manager
+    maintains, not a login. Not linked to CallLog yet either; that's the
+    natural next step (see docs/frontend-dashboard.md's Agent activity
+    section) but a separate feature from "a manager can add agents."
+    """
+
+    __tablename__ = "agents"
+    __table_args__ = (UniqueConstraint("email", name="uq_agents_email"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class CallLog(Base):
     """One outbound-call attempt, including retries linked to their original attempt."""
 
@@ -55,6 +102,11 @@ class CallLog(Base):
     customer_phone: Mapped[str] = mapped_column(String(20), index=True)
     # The inbound CRM is not part of this service, so this is an indexed external reference.
     ticket_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    # Nullable: rows created before the customers table existed, or dialed ad hoc
+    # (e.g. PlaceRealCallForm) without going through a CRM record, have none.
+    customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"), index=True
+    )
     parent_call_log_id: Mapped[int | None] = mapped_column(
         ForeignKey("call_logs.id", ondelete="SET NULL"), index=True
     )
@@ -76,6 +128,7 @@ class CallLog(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    customer: Mapped["Customer | None"] = relationship(back_populates="call_logs")
     parent_call_log: Mapped["CallLog | None"] = relationship(
         remote_side="CallLog.id", back_populates="retry_attempts"
     )

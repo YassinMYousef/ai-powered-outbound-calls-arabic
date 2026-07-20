@@ -78,27 +78,30 @@ default, per the tool's density dial for this product type.
   citation display, suggested-query chips, loading state, RTL/LTR mixed
   layout per the language policy above.
 - `frontend/src/pages/DashboardPage.tsx` — the quality-manager view: an
-  `AppShell` with an Overview/Details/Agent Activity tab bar, switching between:
+  `AppShell` with an Overview/Details/Agent Activity/Customers/Agents tab bar,
+  switching between:
   - `frontend/src/pages/OverviewPage.tsx` — small insights: the 3 stat cards
     only, for a quick glance.
   - `frontend/src/pages/DetailsPage.tsx` — the same stat cards for context,
     plus the 3 trend charts.
   - `frontend/src/pages/AgentActivityPage.tsx` — see "Agent activity" below.
+  - `frontend/src/pages/CustomersPage.tsx` — see "Customers / CRM" below.
+    Real, not mock.
+  - `frontend/src/pages/AgentsPage.tsx` — see "Agent roster" below. Also real.
 - `frontend/src/pages/AgentConsolePage.tsx` — the agent view: an `AppShell`
   with an Assistant/Call Queue tab bar (same tab pattern as the quality
   manager's tabs), switching between:
   - the Knowledge Base Assistant (`ChatWidget`)
-  - `frontend/src/pages/CallQueuePage.tsx` — see "Call queue" below.
+  - `frontend/src/pages/CallQueuePage.tsx` — see "Call queue" below. Real.
 - `frontend/src/types/reports.ts`, `frontend/src/types/chat.ts`,
-  `frontend/src/types/calls.ts`, `frontend/src/types/agentActivity.ts` —
-  TypeScript types mirroring the exact backend shapes where one exists
-  (`GET /api/reports/kpis`, `POST /api/chat/query`, the `CallLog` model's
-  status/outcome check constraints) so later swaps are a drop-in replacement
-  of a data source, not a rewrite; `agentActivity.ts` has no backend
-  counterpart yet (see below).
+  `frontend/src/types/calls.ts`, `frontend/src/types/customers.ts`,
+  `frontend/src/types/agents.ts`, `frontend/src/types/agentActivity.ts` —
+  TypeScript types mirroring the exact backend shapes where one exists (all
+  of them now, except `agentActivity.ts` — see "Agent activity" below for why
+  that one still has no backend counterpart).
 - `frontend/src/data/mockReports.ts`, `frontend/src/data/mockChat.ts`,
-  `frontend/src/data/mockCalls.ts`, `frontend/src/data/mockAgentActivity.ts` —
-  the mock data backing each mocked view.
+  `frontend/src/data/mockAgentActivity.ts` — the mock data backing the views
+  that are still mocked.
 
 ## Role-based access (mock, pending backend RBAC)
 
@@ -136,31 +139,28 @@ wire this back up to what he built rather than replacing it wholesale:
    key off `user.role`, which will just come from the server instead of the
    login form.
 
-## Call queue (agent, mostly simulated + one real control — outside the formal sprint plan)
+## Call queue (agent, real — outside the formal sprint plan)
 
 Requested directly (not in `sprint_plan.md.pdf`): agents should see scheduled
-calls and the queue, and be able to trigger a call with a button. Built as
-`frontend/src/pages/CallQueuePage.tsx`:
+calls and the queue, and be able to trigger a call with a button. Originally
+built as a simulated mock table (see git history on
+`frontend/src/pages/CallQueuePage.tsx` if that phase needs revisiting), but
+once `GET /api/calls` existed there was no reason to keep it mocked, so it
+was rewritten to be fully real:
 
-- **The table is still simulated mock data** — there's still no `GET` list
-  endpoint for calls, so there's nothing real to populate rows from. "Start
-  call" / "Retry" plays out `queued → initiated → ringing → in_progress →
-  completed/no_answer/failed` client-side with a random outcome, using the
-  same status values and retry rule as the backend
-  (`backend/app/telephony/call_flow.py`'s `MAX_ATTEMPTS = 3` and
-  `_RETRYABLE_STATUSES`).
-- **Manual status/outcome override**: once a call is finalized (`completed`,
-  `no_answer`, `busy`, `failed`, `cancelled`), the row grows inline `<select>`
-  editors so an agent can correct the recorded status/outcome by hand. This is
-  a local-only mutation — there's no `PATCH`/update endpoint yet either.
-- **`frontend/src/components/PlaceRealCallForm.tsx` is genuinely wired up** —
-  it `POST`s to `/api/calls` (below), which really dials through Twilio. Kept
-  as a visually separate card below the mock table, not a button on a mock
-  row, so a click can never be confused with the simulated ones. It requires
-  a phone number, shows a browser `confirm()` naming the number before
-  sending, and surfaces the created call's id/status or any error inline.
+- `CallQueuePage.tsx` fetches `GET /api/calls` (all `CallLog` rows, newest
+  first) on mount, with a manual "Refresh" button. A customer flagged on the
+  Customers tab shows up here as a `queued` row.
+- Each `queued` row gets a real **"Start call"** button →
+  `POST /api/calls/{id}/dial` → `confirm()` naming the number first.
+  Non-`queued` rows show their status only — there's no manual
+  status/outcome override anymore (that was a mock-only affordance; there's
+  no `PATCH` endpoint, and overriding real data by hand isn't the goal).
+- `frontend/src/components/PlaceRealCallForm.tsx` (unchanged in behavior)
+  stays as a separate card below the table, for dialing a number that isn't
+  already a customer/queued row — e.g. an ad hoc test call.
 
-### The new backend endpoint (`backend/app/api/calls.py`)
+### The backend endpoints (`backend/app/api/calls.py`)
 
 Person B's `workers/tasks.py` (`place_outbound_call`, `schedule_follow_up_batch`)
 and the `/telephony/*` webhook loop (`voice` → `gather` → dialog → `status`,
@@ -178,10 +178,17 @@ through the UI":
   `schedule_follow_up_batch` instead of raising 501. Careful with this one
   manually: it dials **every** `CallLog` row currently at `status="queued"`,
   not just one.
+- `GET /api/calls` *(new)* — every `CallLog` row, newest first. Backs
+  `CallQueuePage.tsx`'s table.
+- `POST /api/calls/{call_id}/dial` *(new)* — dial one existing row, only
+  while it's still `"queued"` (409 otherwise). Backs the per-row "Start call"
+  button. Retries are still handled automatically by
+  `telephony/webhooks.py`'s `/status` handler, not by re-dialing a finished
+  row through here.
 - `GET /api/calls/{call_id}` *(fixed)* — now actually reads the `CallLog` row
   instead of raising 501.
 
-Tests: `backend/tests/test_calls_api.py` (6 cases). The Celery enqueue calls
+Tests: `backend/tests/test_calls_api.py` (12 cases). The Celery enqueue calls
 are monkeypatched in tests, same pattern as `test_kb_api.py`, so the suite
 never needs Redis or real Twilio credentials.
 
@@ -222,6 +229,87 @@ useful output: before this can go live, `CallLog` (or a new table) needs an
 agent-identity field, and something needs to record KB-query events per
 agent (today `ChatWidget` has no concept of "whose" question it is either).
 
+## Customers / CRM (manager, real — Person B's Sprint 4)
+
+Person B's Sprint 4 task per `sprint_plan.md.pdf` is "Integrate CRM/customer-
+flagged-list API." There is no real external CRM to integrate with — the
+requirements doc's architecture diagram has a `[CRM / Inbound Call Records]`
+box with nothing concrete behind it. Rather than build a stand-in "import a
+list" endpoint, this is a genuine new CRM module living in the project:
+
+- `backend/app/data/models.py`'s new `Customer` model (`name`, `phone`
+  unique, `notes`) plus a nullable `CallLog.customer_id` FK — migration
+  `6d3bc12f912a_add_customers_table_and_call_logs_.py`. `customer_id` is
+  `NULL` for calls dialed ad hoc (e.g. `PlaceRealCallForm`, or anything from
+  before this migration) and set when a call originates from flagging a
+  customer.
+- `backend/app/api/customers.py`: `POST /api/customers` (create, 409 on
+  duplicate phone), `GET /api/customers` (list), `GET /api/customers/{id}`
+  (customer + call history), `DELETE /api/customers/{id}` (past call history
+  is kept — `customer_id` on those rows just goes `NULL`, handled by
+  SQLAlchemy's own unit-of-work dependency resolution, not a DB-level
+  cascade, so it's identical on SQLite and Postgres),
+  `POST /api/customers/{id}/flag` (creates a `status="queued"` `CallLog`
+  linked to the customer).
+- **Flagging only queues — it does not dial.** `POST /.../flag` returns 201
+  and stops there; the row is picked up by the *existing*
+  `POST /api/calls/schedule` (or a future nightly scheduler) exactly like any
+  other queued row, mirroring the requirements doc's two distinct workflow
+  steps ("fetch flagged customers" vs. "schedule outbound call slot"). This
+  was a deliberate product decision, not a limitation — see the design
+  discussion in this PR's conversation history if the rationale needs
+  revisiting.
+- `frontend/src/pages/CustomersPage.tsx`: a real (not mock) 4th
+  `DashboardPage` tab — add-customer form, customer table, per-row "Flag for
+  follow-up" (optional ticket ID), and an expandable per-customer call
+  history. All genuinely wired to the endpoints above via `api()`.
+
+**Cross-team note**: this touches `backend/app/data/models.py`, which is
+Person D's owned module per `CODEOWNERS` — get their review even though the
+feature is framed as Person B's Sprint 4. Anyone with a local dev DB needs
+`alembic upgrade head` (from `backend/`) after pulling this to pick up the
+new `customers` table.
+
+## Agent roster (manager, real — requested directly, not in the sprint plan)
+
+- `backend/app/data/models.py`'s new `Agent` model (`name`, `email` unique) —
+  migration `a64413ab4fa6_add_agents_table.py`. **Not an auth system**:
+  `data/auth.py`'s OAuth2/RBAC is still `NotImplementedError`, so this is a
+  roster a manager maintains, not account creation or login. **Not yet linked
+  to `CallLog`** either — there's no `agent_id` column — so it doesn't yet
+  close the gap flagged in Agent Activity above (no real per-agent call
+  attribution); that's a natural next step, not done here.
+- `backend/app/api/agents.py`: `POST /api/agents` (create, 409 on duplicate
+  email), `GET /api/agents` (list), `DELETE /api/agents/{id}`.
+- `frontend/src/pages/AgentsPage.tsx`: a real 5th `DashboardPage` tab —
+  add-agent form, roster table, per-row delete. Same pattern as
+  `CustomersPage.tsx`.
+
+### Full call-flow integration testing (the other half of Sprint 4)
+
+`backend/tests/test_call_flow_integration.py` drives the real functions
+across `api/customers.py`, `workers/tasks.py`, and `telephony/webhooks.py`
+together — flag a customer → `schedule_follow_up_batch` dials it →
+`/telephony/status` reports in-progress then completed → duration/timestamps
+persist → the customer's call history reflects it. A second test covers the
+no-answer → retry branch. Neither existed before; this was genuinely
+untested territory, not a re-test of existing coverage.
+
+Writing it surfaced two real bugs, both fixed alongside it in
+`backend/app/telephony/webhooks.py`'s `/status` handler:
+
+1. **The retry row silently dropped `customer_id`.** It copied
+   `customer_phone`/`ticket_id` from the original row but not the new FK, so
+   a retried call would have lost its CRM link. Fixed by copying
+   `customer_id` too.
+2. **`place_outbound_call.delay(retry_row.id)` had no error handling** —
+   unlike every other Celery enqueue call site in the codebase
+   (`api/calls.py`'s `_enqueue_dial`, `api/kb.py`'s `_enqueue_ingest`), a dead
+   broker here would have turned a Twilio webhook request into an unhandled
+   500. Changed to `apply_async(..., retry=False)` wrapped in the same
+   try/except-and-log-a-warning pattern as the others — the row stays
+   `"queued"` and `schedule_follow_up_batch` will still pick it up later.
+
 ## Explicitly mocked / out of scope for this PR
 
 - No live API calls anywhere: `GET /api/reports/kpis` returns HTTP 501 today
@@ -230,10 +318,9 @@ agent (today `ChatWidget` has no concept of "whose" question it is either).
   pgvector all running, none of which are wired into local dev yet.
 - No real authentication (see Role-based access above) — sign-in is a local
   role picker, not connected to the backend.
-- The call queue *table* is still simulated (see Call queue above) — only
-  `PlaceRealCallForm`'s single control actually dials.
 - No real agent-activity data (see Agent activity above) — the backend has
-  nothing to fetch yet, not just an unimplemented endpoint.
+  nothing to fetch yet, not just an unimplemented endpoint. (The new `Agent`
+  roster table doesn't close this gap — it isn't linked to `CallLog`.)
 - No manual dark-mode toggle (see Design system above).
 
 ## Continuing into Sprint 3/4
@@ -247,12 +334,12 @@ agent (today `ChatWidget` has no concept of "whose" question it is either).
    plan's explicit reminder.
 3. Wire real OAuth2/RBAC into `AuthContext` per the Role-based access section
    above, once Person D's backend work lands.
-4. Add integration tests across the full call flow and a chatbot-accuracy test
-   suite (Sprint 4 tasks, not yet started).
-5. In `CallQueuePage.tsx`, once Person B's queue and a real `/api/calls` list +
-   schedule endpoint exist, replace `data/mockCalls.ts` and `simulateCall()`
-   with a real fetch + `POST /api/calls/schedule` — and add an explicit
-   confirm step before that call, since it dials (and bills) a real number.
+4. Add a chatbot-accuracy test suite (the other Sprint 4 task; full call-flow
+   integration testing is done — see `test_call_flow_integration.py` above).
+5. Done: `CallQueuePage.tsx` is fully real now (`GET /api/calls`,
+   `POST /api/calls/{id}/dial`) — see "Call queue" above. Next natural step
+   here is linking `Agent` to `CallLog` (an `agent_id` column) so Agent
+   Activity can drop its mock data too.
 
 ## Verification
 

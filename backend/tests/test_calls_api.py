@@ -68,3 +68,37 @@ def test_get_call_returns_logged_fields(client, db_session) -> None:
 def test_get_call_missing_is_404(client) -> None:
     response = client.get("/api/calls/999999")
     assert response.status_code == 404
+
+
+def test_list_calls_newest_first(client, dialed) -> None:
+    client.post("/api/calls", json={"customer_phone": TEST_NUMBER, "ticket_id": "TCK-A"})
+    client.post("/api/calls", json={"customer_phone": TEST_NUMBER, "ticket_id": "TCK-B"})
+
+    response = client.get("/api/calls")
+    assert response.status_code == 200
+    tickets = [c["ticket_id"] for c in response.json()]
+    assert tickets == ["TCK-B", "TCK-A"]
+
+
+def test_dial_call_enqueues_and_returns_202(client, db_session, dialed) -> None:
+    created = client.post("/api/calls", json={"customer_phone": TEST_NUMBER}).json()
+    dialed.clear()  # created already enqueued once; isolate the /dial call
+
+    response = client.post(f"/api/calls/{created['id']}/dial")
+    assert response.status_code == 202
+    assert dialed == [created["id"]]
+
+
+def test_dial_call_missing_is_404(client) -> None:
+    response = client.post("/api/calls/999999/dial")
+    assert response.status_code == 404
+
+
+def test_dial_call_not_queued_is_409(client, db_session) -> None:
+    row = CallLog(customer_phone=TEST_NUMBER, status="completed")
+    db_session.add(row)
+    db_session.commit()
+    db_session.refresh(row)
+
+    response = client.post(f"/api/calls/{row.id}/dial")
+    assert response.status_code == 409
