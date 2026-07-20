@@ -2,10 +2,12 @@
  * Quality-manager view — KPIs from GET /api/reports/kpis (backend/app/api/reports.py).
  * Module: Frontend/Dashboard.
  *
- * Three sub-pages behind one AppShell: Overview (small insights — the 3 stat
- * cards), Details (the same cards for context, plus 14-day trend charts), and
+ * Five sub-pages behind one AppShell: Overview (small insights — the 3 stat
+ * cards), Details (the same cards for context, plus 14-day trend charts),
  * Agent Activity (per-agent roster + activity feed, mock — see
- * data/mockAgentActivity.ts). Overview/Details still read from
+ * data/mockAgentActivity.ts), Customers (real CRM records — see
+ * backend/app/api/customers.py), and Agents (real agent roster — see
+ * backend/app/api/agents.py). Overview/Details still read from
  * data/mockReports.ts — Sprint 3 swaps that import for a real
  * `api<Kpis>('/api/reports/kpis')` call — see docs/frontend-dashboard.md.
  */
@@ -14,8 +16,10 @@ import AppShell from '../components/layout/AppShell'
 import OverviewPage from './OverviewPage'
 import DetailsPage from './DetailsPage'
 import AgentActivityPage from './AgentActivityPage'
+import CustomersPage from './CustomersPage'
+import AgentsPage from './AgentsPage'
 
-type View = 'overview' | 'details' | 'agents'
+type View = 'overview' | 'details' | 'agent-activity' | 'customers' | 'agents'
 
 export default function DashboardPage() {
   const [view, setView] = useState<View>('overview')
@@ -25,12 +29,16 @@ export default function DashboardPage() {
       tabs={[
         { label: 'Overview', active: view === 'overview', onClick: () => setView('overview') },
         { label: 'Details', active: view === 'details', onClick: () => setView('details') },
-        { label: 'Agent Activity', active: view === 'agents', onClick: () => setView('agents') },
+        { label: 'Agent Activity', active: view === 'agent-activity', onClick: () => setView('agent-activity') },
+        { label: 'Customers', active: view === 'customers', onClick: () => setView('customers') },
+        { label: 'Agents', active: view === 'agents', onClick: () => setView('agents') },
       ]}
     >
       {view === 'overview' && <OverviewPage />}
       {view === 'details' && <DetailsPage />}
-      {view === 'agents' && <AgentActivityPage />}
+      {view === 'agent-activity' && <AgentActivityPage />}
+      {view === 'customers' && <CustomersPage />}
+      {view === 'agents' && <AgentsPage />}
     </AppShell>
   )
 }

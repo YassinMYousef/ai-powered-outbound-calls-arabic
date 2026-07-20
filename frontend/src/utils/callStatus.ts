@@ -25,3 +25,10 @@ export function statusTone(status: CallStatus): StatStatus {
   if (status === 'no_answer' || status === 'busy' || status === 'failed' || status === 'cancelled') return 'bad'
   return 'neutral' // queued
 }
+
+export const STATUS_TONE_CLASSES: Record<StatStatus, string> = {
+  good: 'bg-[var(--success)]/10 text-[var(--success)]',
+  warn: 'bg-[var(--accent)]/10 text-[var(--accent)]',
+  bad: 'bg-[var(--danger)]/10 text-[var(--danger)]',
+  neutral: 'bg-[var(--surface-muted)] text-[var(--text-muted)]',
+}
