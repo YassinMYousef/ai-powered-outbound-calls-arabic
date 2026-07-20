@@ -7,7 +7,7 @@ autogenerate proposed was removed (that index is created dialect-guarded in
 rewritten as CURRENT_TIMESTAMP so the migration also runs on SQLite (tests).
 
 Revision ID: 0003_full_product_schema
-Revises: 0002_sprint1_data_enhancements
+Revises: a64413ab4fa6
 Create Date: 2026-07-19
 """
 from typing import Sequence, Union
@@ -16,7 +16,10 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "0003_full_product_schema"
-down_revision: Union[str, None] = "0002_sprint1_data_enhancements"
+# Chained after Person B's Sprint 4 migrations (customers, agents) when the two
+# branches merged, so the DAG has a single head. This adds only the tables those
+# two don't touch; customers gains its extra columns in 0005.
+down_revision: Union[str, None] = "a64413ab4fa6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

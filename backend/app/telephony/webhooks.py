@@ -271,6 +271,7 @@ async def status(request: Request, db: Session = Depends(get_db)) -> Response:
 
     if is_terminal and should_retry(our_status, row.attempt_number):
         retry_row = CallLog(
+            customer_id=row.customer_id,
             customer_phone=row.customer_phone,
             ticket_id=row.ticket_id,
             parent_call_log_id=row.id,
@@ -283,6 +284,13 @@ async def status(request: Request, db: Session = Depends(get_db)) -> Response:
             "status webhook: call_id=%s retry queued as call_id=%s (attempt_number=%d)",
             row.id, retry_row.id, retry_row.attempt_number,
         )
-        place_outbound_call.delay(retry_row.id)
+        # Best-effort, same pattern as api/calls.py's _enqueue_dial: a dead
+        # broker must not turn a webhook response into a 500 for Twilio. The
+        # row stays "queued" either way — schedule_follow_up_batch will pick
+        # it up on the next run if this enqueue is lost.
+        try:
+            place_outbound_call.apply_async(args=[retry_row.id], retry=False)
+        except Exception:
+            logger.warning("could not enqueue retry dial for call %s (is Redis/the worker up?)", retry_row.id)
 
     return Response(status_code=204)

@@ -1,8 +1,11 @@
+from sqlalchemy import UniqueConstraint
+
 from app.data.models import (
     Base,
     CallLog,
     ChatMessage,
     ChatSession,
+    Customer,
     KBChunk,
     KBDocument,
     User,
@@ -15,6 +18,7 @@ def test_all_product_tables_are_registered() -> None:
         "kb_documents",
         "kb_chunks",
         "users",
+        "agents",
         "follow_up_tickets",
         "chat_sessions",
         "chat_messages",
@@ -24,6 +28,12 @@ def test_all_product_tables_are_registered() -> None:
         "customers",
         "unanswered_questions",
     }
+
+
+def test_call_log_links_to_customer() -> None:
+    foreign_keys = CallLog.__table__.c.customer_id.foreign_keys
+    assert {foreign_key.target_fullname for foreign_key in foreign_keys} == {"customers.id"}
+    assert Customer.call_logs.property.mapper.class_ is CallLog
 
 
 def test_call_log_retry_relationship_is_a_self_foreign_key() -> None:
@@ -60,4 +70,11 @@ def test_follow_up_ticket_optionally_links_to_local_customer() -> None:
     fks = ticket_table.c.customer_id.foreign_keys
     assert {fk.target_fullname for fk in fks} == {"customers.id"}
     assert ticket_table.c.customer_id.nullable
-    assert Base.metadata.tables["customers"].c.phone.unique
+    # customers.phone is unique via a table-level UniqueConstraint
+    # (uq_customers_phone), not a column flag.
+    customers = Base.metadata.tables["customers"]
+    assert any(
+        {col.name for col in constraint.columns} == {"phone"}
+        for constraint in customers.constraints
+        if isinstance(constraint, UniqueConstraint)
+    )

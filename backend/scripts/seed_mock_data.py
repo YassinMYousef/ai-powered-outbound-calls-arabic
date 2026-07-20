@@ -276,7 +276,7 @@ def _seed_customers(db) -> list[Customer]:
             phone = _phone()
         phones.add(phone)
         customer = Customer(
-            full_name=_customer_name(),
+            name=_customer_name(),
             phone=phone,
             email=f"customer{i + 1:02d}@example.com" if rng.random() < 0.4 else None,
             governorate=rng.choice(GOVERNORATES),
@@ -311,7 +311,7 @@ def _seed_calls(db, customers: list[Customer]) -> tuple[list[FollowUpTicket], li
         ticket = FollowUpTicket(
             crm_ticket_id=f"CRM-2026-{1000 + i}",
             customer_id=customer.id,
-            customer_name=customer.full_name,
+            customer_name=customer.name,
             customer_phone=customer.phone,
             procedure=procedure,
             issue_summary=issue,
@@ -631,7 +631,7 @@ def main() -> int:
         for customer in customers[:8]:
             print(
                 f"  id={customer.id:<3} {customer.phone:<15} "
-                f"{customer.governorate:<12} {customer.full_name}"
+                f"{customer.governorate:<12} {customer.name}"
             )
 
     print("embedding KB documents via the TEI container:")

@@ -1,9 +1,9 @@
 """Database models — the full product schema.
 
-Module: Backend/Data. Covers the call loop (call_logs, follow_up_tickets),
-the RAG loop (kb_documents, kb_chunks, chat_sessions, chat_messages), and the
-data/reporting surface (users + RBAC, fcr_reports, audit_logs); change them
-via Alembic migrations (backend/alembic/).
+Module: Backend/Data. Covers the call loop (customers, agents, call_logs,
+follow_up_tickets), the RAG loop (kb_documents, kb_chunks, chat_sessions,
+chat_messages), and the data/reporting surface (users + RBAC, fcr_reports,
+audit_logs); change them via Alembic migrations (backend/alembic/).
 """
 
 from datetime import datetime
@@ -34,6 +34,69 @@ class Base(DeclarativeBase):
     pass
 
 
+class Customer(Base):
+    """A CRM customer record — the local mirror of CRM contact data.
+
+    The requirements doc's architecture diagram has a "[CRM / Inbound Call
+    Records]" box with no real external system behind it — this table is
+    that source of truth for this project: who to follow up with, and why
+    (via `CallLog.ticket_id`/`customer_id` on calls flagged from here, and the
+    `follow_up_tickets` the batch scheduler consumes).
+    """
+
+    __tablename__ = "customers"
+    __table_args__ = (
+        UniqueConstraint("phone", name="uq_customers_phone"),
+        UniqueConstraint("crm_customer_id", name="uq_customers_crm_customer_id"),
+        CheckConstraint(
+            "preferred_language IN ('ar-EG', 'ar')", name="ck_customers_preferred_language"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))  # Arabic
+    phone: Mapped[str] = mapped_column(String(20), index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    email: Mapped[str | None] = mapped_column(String(255))
+    governorate: Mapped[str | None] = mapped_column(String(64))  # Arabic
+    # Egyptian colloquial vs MSA — steers TTS voice/register once selectable.
+    preferred_language: Mapped[str] = mapped_column(
+        String(8), default="ar-EG", server_default="ar-EG"
+    )
+    # External CRM identifier, same pattern as CallLog.ticket_id.
+    crm_customer_id: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    call_logs: Mapped[list["CallLog"]] = relationship(back_populates="customer")
+    follow_up_tickets: Mapped[list["FollowUpTicket"]] = relationship(back_populates="customer")
+
+
+class Agent(Base):
+    """A human agent on the outbound-calling team.
+
+    Not an auth account — backend/app/data/auth.py's OAuth2/RBAC is still
+    unimplemented (NotImplementedError), so this is a roster a manager
+    maintains, not a login. Not linked to CallLog yet either; that's the
+    natural next step (see docs/frontend-dashboard.md's Agent activity
+    section) but a separate feature from "a manager can add agents."
+    """
+
+    __tablename__ = "agents"
+    __table_args__ = (UniqueConstraint("email", name="uq_agents_email"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class CallLog(Base):
     """One outbound-call attempt, including retries linked to their original attempt."""
 
@@ -59,6 +122,11 @@ class CallLog(Base):
     customer_phone: Mapped[str] = mapped_column(String(20), index=True)
     # The inbound CRM is not part of this service, so this is an indexed external reference.
     ticket_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    # Nullable: rows created before the customers table existed, or dialed ad hoc
+    # (e.g. PlaceRealCallForm) without going through a CRM record, have none.
+    customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"), index=True
+    )
     parent_call_log_id: Mapped[int | None] = mapped_column(
         ForeignKey("call_logs.id", ondelete="SET NULL"), index=True
     )
@@ -80,6 +148,7 @@ class CallLog(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    customer: Mapped["Customer | None"] = relationship(back_populates="call_logs")
     parent_call_log: Mapped["CallLog | None"] = relationship(
         remote_side="CallLog.id", back_populates="retry_attempts"
     )
@@ -282,37 +351,6 @@ class User(Base):
     )
 
     chat_sessions: Mapped[list["ChatSession"]] = relationship(back_populates="user")
-
-
-class Customer(Base):
-    """A customer we call for follow-ups — the local mirror of CRM contact data."""
-
-    __tablename__ = "customers"
-    __table_args__ = (
-        CheckConstraint(
-            "preferred_language IN ('ar-EG', 'ar')", name="ck_customers_preferred_language"
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    full_name: Mapped[str] = mapped_column(String(255))  # Arabic
-    phone: Mapped[str] = mapped_column(String(20), unique=True)
-    email: Mapped[str | None] = mapped_column(String(255))
-    governorate: Mapped[str | None] = mapped_column(String(64))  # Arabic
-    # Egyptian colloquial vs MSA — steers TTS voice/register once selectable.
-    preferred_language: Mapped[str] = mapped_column(
-        String(8), default="ar-EG", server_default="ar-EG"
-    )
-    # External CRM identifier, same pattern as CallLog.ticket_id.
-    crm_customer_id: Mapped[str | None] = mapped_column(String(64), unique=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-    follow_up_tickets: Mapped[list["FollowUpTicket"]] = relationship(back_populates="customer")
 
 
 class FollowUpTicket(Base):
