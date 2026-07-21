@@ -22,12 +22,10 @@ export class ApiError extends Error {
   }
 }
 
-// Bearer token for authenticated requests. Null until a backend-issued JWT
-// exists — backend/app/data/auth.py (get_current_user / require_role) still
-// raises NotImplementedError and there is no /api/auth/token route yet, so mock
-// auth (auth/AuthContext.tsx) never sets this. When OAuth2/RBAC lands, having
-// AuthContext call setAuthToken(jwt) is all that's needed to authenticate every
-// reports/chat/kb/calls request — they all pass through api() below.
+// Bearer token for authenticated requests. Set by api/auth.ts after a successful
+// POST /api/auth/token (and on session restore); null when signed out. Every
+// reports/chat/kb/calls request flows through api() below, so this one line
+// authenticates all of them.
 let authToken: string | null = null
 
 export function setAuthToken(token: string | null): void {

@@ -1,41 +1,57 @@
 /**
- * Mock-only auth state — NOT connected to the backend.
+ * Auth state backed by the real backend (backend/app/data/auth.py).
  *
- * backend/app/data/auth.py's get_current_user() and require_role() are both
- * `raise NotImplementedError` (Person D, Sprint 3, not started yet). Until
- * that lands there is no /api/auth/token to call, so `login` below just
- * stores a role locally; it never hits the network.
- *
- * TODO(auth): once Person D ships OAuth2/RBAC, replace `login` with a real
- * `POST /api/auth/token` call, derive `user` from the decoded JWT the backend
- * returns, and call `setAuthToken(jwt)` from api/client.ts (clear it in
- * `logout`). Every reports/chat/kb/calls request already flows through that one
- * choke point, so no call site needs to change.
+ * `login` calls POST /api/auth/token, activates the returned JWT (so every
+ * api/client.ts request is authenticated), and derives `user` — including its
+ * role — from GET /api/auth/me. A persisted token is restored on load. There is
+ * no client-side role selection: the backend token is the sole source of truth.
  */
-import { createContext, useContext, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { MockUser, Role } from './types'
+import type { AuthUser } from './types'
+import { clearToken, login as apiLogin, restoreSession } from '../api/auth'
 
 interface AuthContextValue {
-  user: MockUser | null
-  login: (email: string, role: Role) => void
-  switchRole: (role: Role) => void
+  user: AuthUser | null
+  /** 'loading' while a persisted session is being restored; 'ready' afterwards. */
+  status: 'loading' | 'ready'
+  login: (username: string, password: string) => Promise<void>
   logout: () => void
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<MockUser | null>(null)
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [status, setStatus] = useState<'loading' | 'ready'>('loading')
+
+  useEffect(() => {
+    let active = true
+    restoreSession()
+      .then((restored) => {
+        if (active) setUser(restored)
+      })
+      .finally(() => {
+        if (active) setStatus('ready')
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
-      login: (email, role) => setUser({ name: email.split('@')[0] || 'User', email, role }),
-      switchRole: (role) => setUser((prev) => (prev ? { ...prev, role } : prev)),
-      logout: () => setUser(null),
+      status,
+      login: async (username, password) => {
+        setUser(await apiLogin(username, password))
+      },
+      logout: () => {
+        clearToken()
+        setUser(null)
+      },
     }),
-    [user],
+    [user, status],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

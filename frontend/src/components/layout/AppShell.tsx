@@ -18,11 +18,12 @@ interface AppShellProps {
 const ROLE_LABEL: Record<Role, string> = {
   agent: 'Agent',
   quality_manager: 'Quality Manager',
+  admin: 'Admin',
 }
 
 /** Base app structure (Sprint 1): header + content container. Role determines which top-level page renders (see App.tsx); `tabs` optionally switches sub-pages within one role. */
 export default function AppShell({ children, tabs }: AppShellProps) {
-  const { user, switchRole, logout } = useAuth()
+  const { user, logout } = useAuth()
 
   return (
     <div className="min-h-screen bg-[var(--surface)]">
@@ -45,17 +46,6 @@ export default function AppShell({ children, tabs }: AppShellProps) {
 
             {user && (
               <>
-                {import.meta.env.DEV && (
-                  <select
-                    value={user.role}
-                    onChange={(e) => switchRole(e.target.value as Role)}
-                    title="Dev-only: preview the other role without signing out. Removed once real roles come from the backend."
-                    className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none"
-                  >
-                    <option value="agent">DEV: Agent</option>
-                    <option value="quality_manager">DEV: Quality Manager</option>
-                  </select>
-                )}
                 <div className="flex items-center gap-2 border-l border-[var(--border-subtle)] pl-3">
                   <div className="text-right leading-tight">
                     <p className="text-xs font-medium text-[var(--text-primary)]">{user.name}</p>

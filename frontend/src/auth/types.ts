@@ -1,11 +1,11 @@
 /**
- * Roles mirror the two consumers named in the requirements doc: the agent
- * desktop (chat widget) and the quality team (FCR dashboard). Extend this
- * once backend/app/data/auth.py's require_role() defines the real role set.
+ * Roles mirror backend/app/data/auth.py's ROLE_LEVELS (agent < quality_manager
+ * < admin). The role always comes from the backend-issued token, never chosen
+ * in the UI.
  */
-export type Role = 'agent' | 'quality_manager'
+export type Role = 'agent' | 'quality_manager' | 'admin'
 
-export interface MockUser {
+export interface AuthUser {
   name: string
   email: string
   role: Role
