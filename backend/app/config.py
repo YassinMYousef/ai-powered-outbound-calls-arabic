@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     rag_chunk_size: int = 1500  # characters ≈ 400–500 Arabic tokens
     rag_chunk_overlap: int = 200
     rag_top_k: int = 5  # passages retrieved per question
+    # Embed an uploaded KB document inline in the upload request instead of only
+    # enqueuing a Celery task. Default True so a doc is embedded (kb_chunks) the
+    # moment it is uploaded even without a running worker/beat — the enqueue path
+    # silently strands docs when nothing consumes the queue. Set False at
+    # production scale to offload embedding to the worker (falls back to enqueue
+    # automatically if the inline embed fails).
+    kb_ingest_sync: bool = True
 
     # RAG answer generation (Anthropic). Citations are a hard requirement, so the
     # answer is grounded with the Citations API — see conversation/rag/answer.py.

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.conversation.rag.extract import extract_text
 from app.data import audit, kb_gaps
 from app.data.auth import require_role
@@ -22,7 +23,7 @@ router = APIRouter()
 
 
 def _enqueue_ingest(doc_id: int) -> None:
-    """Best-effort immediate embed; the nightly batch is the guaranteed path.
+    """Best-effort async embed via the worker; the nightly batch is the backstop.
 
     retry=False so a dead broker fails fast instead of blocking the request.
     """
@@ -32,6 +33,30 @@ def _enqueue_ingest(doc_id: int) -> None:
         ingest_kb_document.apply_async(args=[doc_id], retry=False)
     except Exception:
         logger.warning("could not enqueue ingest for KB doc %s (is Redis up?)", doc_id)
+
+
+def _ingest_on_upload(db: Session, doc_id: int) -> tuple[str, int | None]:
+    """Embed the freshly-uploaded doc, returning (status, chunk_count).
+
+    With settings.kb_ingest_sync (the default) the doc is embedded inline, so it
+    lands in kb_chunks in the same request — no running worker required. If that
+    inline embed fails (e.g. the TEI embedding server is down) we fall back to
+    the async queue so the doc is retried rather than silently stranded. With
+    kb_ingest_sync off, embedding is offloaded to the worker as before.
+    """
+    if settings.kb_ingest_sync:
+        from app.conversation.rag import ingest
+
+        try:
+            chunks = ingest.ingest_document(doc_id, db=db)
+            return "embedded", chunks
+        except Exception:
+            logger.exception(
+                "inline embed failed for KB doc %s; falling back to async queue", doc_id
+            )
+            db.rollback()  # clear the failed txn before the enqueue path
+    _enqueue_ingest(doc_id)
+    return "pending_embedding", None
 
 
 @router.post("/documents", status_code=202)
@@ -53,12 +78,16 @@ def upload_document(
     db.add(doc)
     db.commit()
     db.refresh(doc)
-    _enqueue_ingest(doc.id)
+    doc_id, title = doc.id, doc.title
+    status, chunks = _ingest_on_upload(db, doc_id)
     audit.record(
         db, user_id=user.id, action="kb.upload", resource_type="kb_document",
-        resource_id=doc.id, detail={"title": doc.title},
+        resource_id=doc_id, detail={"title": title},
     )
-    return {"id": doc.id, "title": doc.title, "status": "pending_embedding"}
+    result = {"id": doc_id, "title": title, "status": status}
+    if chunks is not None:
+        result["chunks"] = chunks
+    return result
 
 
 @router.get("/documents")
