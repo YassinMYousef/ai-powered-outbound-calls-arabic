@@ -7,9 +7,9 @@
  */
 import { useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import { AlertTriangle, CalendarClock, FileBarChart, Loader2, PhoneCall, Search } from 'lucide-react'
+import { AlertTriangle, CalendarClock, Download, FileBarChart, Loader2, PhoneCall, Search } from 'lucide-react'
 import { describeError } from '../api/client'
-import { getFcrReport } from '../api/reports'
+import { downloadFcrReportPdf, getFcrReport } from '../api/reports'
 import { scheduleFollowUpBatch, getCall } from '../api/calls'
 import type { FcrReport } from '../types/reports'
 import type { CallDetail, ScheduleBatchResult } from '../types/calls'
@@ -54,6 +54,9 @@ function Card({
 const btn =
   'flex items-center justify-center gap-1.5 rounded-lg bg-[var(--brand)] px-3.5 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40'
 
+const btnGhost =
+  'flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-muted)] disabled:opacity-40'
+
 function ScheduleBatchCard() {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ScheduleBatchResult | null>(null)
@@ -96,6 +99,7 @@ function ScheduleBatchCard() {
 
 function FcrReportCard() {
   const [loading, setLoading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const [report, setReport] = useState<FcrReport | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -112,16 +116,34 @@ function FcrReportCard() {
     }
   }
 
+  async function downloadPdf() {
+    setDownloading(true)
+    setError(null)
+    try {
+      await downloadFcrReportPdf()
+    } catch (err) {
+      setError(describeError(err))
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <Card
       icon={<FileBarChart size={17} />}
       title="First Call Resolutions report"
       description="Compile the quality team's FCR report for the latest reporting window."
     >
-      <button type="button" onClick={run} disabled={loading} className={btn}>
-        {loading ? <Loader2 size={15} className="animate-spin" /> : <FileBarChart size={15} />}
-        Generate report
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={downloadPdf} disabled={downloading} className={btn}>
+          {downloading ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+          Download PDF
+        </button>
+        <button type="button" onClick={run} disabled={loading} className={btnGhost}>
+          {loading ? <Loader2 size={15} className="animate-spin" /> : <FileBarChart size={15} />}
+          Preview figures
+        </button>
+      </div>
       {report && (
         <div className="mt-3 space-y-3">
           <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
@@ -150,14 +172,10 @@ function FcrReportCard() {
               </dd>
             </div>
           </dl>
-          {report.report_markdown && (
-            <pre
-              dir="rtl"
-              className="font-arabic max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] p-3 text-xs text-[var(--text-primary)]"
-            >
-              {report.report_markdown}
-            </pre>
-          )}
+          <p className="text-xs text-[var(--text-muted)]">
+            Use <span className="font-medium text-[var(--text-primary)]">Download PDF</span> for the full formatted
+            report (logo, Arabic layout, resolved-cases table).
+          </p>
         </div>
       )}
       {error && <Notice text={error} />}

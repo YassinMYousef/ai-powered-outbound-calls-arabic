@@ -224,6 +224,21 @@ def generate_fcr_report(
     return report
 
 
+def resolved_calls_in_window(
+    db: Session, period_start: datetime, period_end: datetime
+) -> list[CallLog]:
+    """The resolved calls backing a report's [period_start, period_end) window."""
+    return db.execute(
+        select(CallLog)
+        .where(
+            CallLog.created_at >= period_start,
+            CallLog.created_at < period_end,
+            CallLog.outcome == "resolved",
+        )
+        .order_by(CallLog.created_at)
+    ).scalars().all()
+
+
 def generate_recent_fcr_report(
     db: Session, days: int = 7, generated_by_user_id: int | None = None
 ) -> FCRReport:

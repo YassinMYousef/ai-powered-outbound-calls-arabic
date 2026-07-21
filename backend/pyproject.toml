@@ -21,6 +21,9 @@ dependencies = [
     "anthropic>=0.60",
     "pgvector>=0.2.5",
     "pypdf>=4.0",
+    "reportlab>=4.0",
+    "arabic-reshaper>=3.0",
+    "python-bidi>=0.4",
     "python-docx>=1.1",
     "pydub>=0.25",
     "pyjwt>=2.8",
@@ -37,6 +40,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.data.assets" = ["fonts/*.ttf", "fonts/*.txt", "*.png"]
 
 [tool.ruff]
 line-length = 100

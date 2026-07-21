@@ -4,11 +4,11 @@ Module: Backend/Data & Reporting.
 KPIs (requirements doc §5): FCR rate, AI call completion %, average handle time.
 Reporting data is internal — every route requires the quality_manager role.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.data import audit, reporting
+from app.data import audit, pdf_report, reporting
 from app.data.auth import require_role
 from app.data.db import get_db
 from app.data.models import CallLog, User
@@ -68,6 +68,32 @@ def get_fcr_report(
         resource_id=report.id, detail={"days": days},
     )
     return reporting.report_dict(report)
+
+
+@router.get("/fcr.pdf")
+def get_fcr_report_pdf(
+    days: int = Query(default=7, ge=1, le=90),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("quality_manager")),
+) -> Response:
+    """The same 'First Call Resolutions' report as a branded, downloadable PDF.
+
+    Generates/refreshes the report for the last `days` (idempotent per whole-day
+    window, like GET /fcr), then renders it with the Arabic PDF template.
+    """
+    report = reporting.generate_recent_fcr_report(db, days=days, generated_by_user_id=user.id)
+    resolved = reporting.resolved_calls_in_window(db, report.period_start, report.period_end)
+    pdf_bytes = pdf_report.render_fcr_pdf(report, resolved)
+    audit.record(
+        db, user_id=user.id, action="report.fcr.download_pdf", resource_type="fcr_report",
+        resource_id=report.id, detail={"days": days},
+    )
+    filename = f"fcr-report-{report.period_start.date().isoformat()}_{report.period_end.date().isoformat()}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # --- Report accuracy: manual QA audit of AI outcomes (requirements doc §5) ---

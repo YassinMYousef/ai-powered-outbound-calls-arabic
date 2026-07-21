@@ -235,3 +235,4 @@ docker-compose.override.yml
 
 # Runtime log files (app/logging_config.py)
 logs/
+

@@ -6,7 +6,9 @@ the audio endpoint resolves and synthesizes them when Twilio fetches `<Play>`.
 import hashlib
 import json
 import logging
+from collections.abc import Iterable
 from functools import lru_cache
+from pathlib import Path
 from uuid import uuid4
 
 import redis
@@ -15,6 +17,12 @@ from redis.exceptions import RedisError
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Persistent on-disk cache for pre-generated ("downloaded") static-phrase audio.
+# Unlike the Redis cache it has no TTL and survives restarts, so the greeting and
+# closing lines never fall back to a live TTS round-trip. Keyed by the same
+# _audio_key hash as Redis, under app/data/assets (shared asset location).
+_DISK_CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "assets" / "tts"
 
 
 @lru_cache(maxsize=1)
@@ -62,13 +70,34 @@ def _audio_key(text_ar: str) -> str:
     return f"telephony:tts:{hashlib.sha256(source.encode('utf-8')).hexdigest()}"
 
 
+def _disk_path(key: str) -> Path:
+    """Map an _audio_key to its on-disk cache file (hash is the filename)."""
+    return _DISK_CACHE_DIR / f"{key.rsplit(':', 1)[-1]}.audio"
+
+
 def get_cached_audio(text_ar: str) -> bytes | None:
-    """Return cached synthesized audio, treating Redis failures as misses."""
+    """Return cached synthesized audio, treating any cache failure as a miss.
+
+    Checks Redis first (hot, TTL'd), then the persistent on-disk cache. The disk
+    layer holds pre-generated static phrases (prewarm_disk_cache), so the
+    greeting and closing lines are served instantly even after the Redis entry
+    expires or the process restarts — no live TTS synthesis on playback.
+    """
+    key = _audio_key(text_ar)
     try:
-        return _redis().get(_audio_key(text_ar))
+        cached = _redis().get(key)
+        if cached is not None:
+            return cached
     except RedisError:
         logger.warning("could not read telephony TTS cache", exc_info=True)
-        return None
+
+    path = _disk_path(key)
+    try:
+        if path.is_file():
+            return path.read_bytes()
+    except OSError:
+        logger.warning("could not read pre-generated telephony audio", exc_info=True)
+    return None
 
 
 def cache_audio(text_ar: str, audio: bytes) -> None:
@@ -94,3 +123,31 @@ def audio_content_type() -> str:
 def play_url(token: str) -> str:
     """Build the public URL Twilio fetches for a speech token."""
     return f"{settings.public_base_url}/telephony/audio/{token}"
+
+
+def prewarm_disk_cache(phrases: Iterable[str], *, force: bool = False) -> int:
+    """Pre-generate ("download") audio for `phrases` into the on-disk cache.
+
+    Synthesizes each phrase once via ElevenLabs and writes it under
+    _DISK_CACHE_DIR keyed by _audio_key, so later playback (get_cached_audio)
+    never blocks on a live TTS round-trip. Idempotent: an existing file is
+    skipped unless `force` is set (use force after changing voice/model/format,
+    since those are part of the key and would otherwise leave stale files).
+    Returns the number of files written.
+    """
+    # Local import: keeps the telephony module import-light and avoids a hard
+    # dependency on the speech provider just to load audio_store.
+    from app.speech import tts
+
+    _DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for text_ar in phrases:
+        if not text_ar or not text_ar.strip():
+            continue
+        path = _disk_path(_audio_key(text_ar))
+        if path.is_file() and not force:
+            continue
+        audio = tts.synthesize(text_ar)
+        path.write_bytes(audio)
+        written += 1
+    return written

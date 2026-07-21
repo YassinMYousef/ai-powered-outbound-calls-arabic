@@ -50,6 +50,16 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+/** Like api(), but returns the raw response body as a Blob (for file downloads
+ *  such as the FCR report PDF). Carries the same bearer token and error handling. */
+export async function apiBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const headers = new Headers(init?.headers)
+  if (authToken) headers.set('Authorization', `Bearer ${authToken}`)
+  const res = await fetch(path, { ...init, headers })
+  if (!res.ok) throw new ApiError(res.status, await res.text())
+  return res.blob()
+}
+
 /** Human-readable one-liner for an error thrown by api(), for error notices. */
 export function describeError(err: unknown): string {
   if (err instanceof ApiError) {
