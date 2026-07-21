@@ -77,5 +77,105 @@ def test_trends_rejects_out_of_range_days(client) -> None:
     assert client.get("/api/reports/trends", params={"days": 91}).status_code == 422
 
 
-def test_fcr_report_still_stubbed(client) -> None:
-    assert client.get("/api/reports/fcr").status_code == 501
+def test_fcr_report_generates_article(client, db_session) -> None:
+    # Whole-day report window ends at last midnight, so only calls from prior days
+    # (days_ago >= 1) land inside it.
+    db_session.add_all(
+        [
+            _call(outcome="resolved", duration=120, days_ago=1),
+            _call(outcome="resolved", duration=180, days_ago=2),
+            _call(outcome="transferred", duration=60, days_ago=1),
+            _call(status="no_answer", days_ago=1),
+        ]
+    )
+    db_session.commit()
+
+    body = client.get("/api/reports/fcr", params={"days": 7}).json()
+    assert body["total_calls"] == 4
+    assert body["resolved_first_attempt"] == 2
+    assert body["fcr_rate"] == pytest.approx(2 / 4)
+    assert body["completion_rate"] == pytest.approx(2 / 3)
+    assert "First Call Resolutions" in body["report_markdown"]
+    assert "تقرير حالات الحل" in body["report_markdown"]
+    # Phone numbers are masked in the artifact.
+    assert "+201000000000" not in body["report_markdown"]
+    assert "****0000" in body["report_markdown"]
+
+
+def test_fcr_report_is_idempotent_per_window(client, db_session) -> None:
+    from app.data.models import FCRReport
+
+    db_session.add(_call(outcome="resolved", duration=100, days_ago=1))
+    db_session.commit()
+
+    first = client.get("/api/reports/fcr", params={"days": 7}).json()
+    second = client.get("/api/reports/fcr", params={"days": 7}).json()
+    assert first["id"] == second["id"]
+    assert db_session.query(FCRReport).count() == 1
+
+
+def test_fcr_report_empty_window(client) -> None:
+    body = client.get("/api/reports/fcr").json()
+    assert body["total_calls"] == 0
+    assert body["fcr_rate"] == 0.0
+    assert "لا توجد حالات" in body["report_markdown"]
+
+
+# --- Report-accuracy audit (requirements doc §5) ---------------------------
+
+
+def test_accuracy_empty_is_zero(client) -> None:
+    assert client.get("/api/reports/accuracy").json() == {
+        "report_accuracy": 0.0,
+        "audited_calls": 0,
+    }
+
+
+def test_audit_sample_excludes_outcomeless_and_audited(client, db_session) -> None:
+    db_session.add_all([_call(outcome="resolved"), _call(outcome="transferred"), _call(status="no_answer")])
+    db_session.commit()
+
+    sample = client.get("/api/reports/audit/sample", params={"n": 10}).json()
+    assert len(sample) == 2  # the no_answer call has no outcome → not sampleable
+    assert all(c["outcome"] is not None for c in sample)
+
+    client.post("/api/reports/audit", json={"call_id": sample[0]["id"], "audited_outcome": "resolved"})
+    assert len(client.get("/api/reports/audit/sample", params={"n": 10}).json()) == 1
+
+
+def test_report_accuracy_math(client, db_session) -> None:
+    calls = [_call(outcome="resolved"), _call(outcome="resolved"), _call(outcome="transferred")]
+    db_session.add_all(calls)
+    db_session.commit()
+    for c in calls:
+        db_session.refresh(c)
+
+    # agree, disagree, agree → 2/3 accurate.
+    client.post("/api/reports/audit", json={"call_id": calls[0].id, "audited_outcome": "resolved"})
+    client.post("/api/reports/audit", json={"call_id": calls[1].id, "audited_outcome": "unresolved"})
+    client.post("/api/reports/audit", json={"call_id": calls[2].id, "audited_outcome": "transferred"})
+
+    body = client.get("/api/reports/accuracy").json()
+    assert body["audited_calls"] == 3
+    assert body["report_accuracy"] == pytest.approx(2 / 3)
+
+
+def test_submit_audit_is_idempotent_per_call(client, db_session) -> None:
+    from app.data.models import CallAudit
+
+    call = _call(outcome="resolved")
+    db_session.add(call)
+    db_session.commit()
+    db_session.refresh(call)
+
+    first = client.post("/api/reports/audit", json={"call_id": call.id, "audited_outcome": "resolved"}).json()
+    assert first["is_accurate"] is True
+    second = client.post("/api/reports/audit", json={"call_id": call.id, "audited_outcome": "unresolved"}).json()
+    assert second["is_accurate"] is False
+    assert first["id"] == second["id"]
+    assert db_session.query(CallAudit).count() == 1
+
+
+def test_submit_audit_unknown_call_is_404(client) -> None:
+    resp = client.post("/api/reports/audit", json={"call_id": 999999, "audited_outcome": "resolved"})
+    assert resp.status_code == 404

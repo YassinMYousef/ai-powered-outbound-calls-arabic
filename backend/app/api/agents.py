@@ -1,11 +1,8 @@
 """Agent roster management — a manager adds/removes agents.
 
-Module: Backend/Data (the Agent model). Not an auth system — see
-data/auth.py — this is a roster, not login accounts.
-
-TODO(auth): guard with data/auth.require_role (quality_manager only) once
-OAuth2/RBAC lands, same gap already noted in api/calls.py, api/customers.py,
-api/chat.py, api/kb.py.
+Module: Backend/Data (the Agent model). Not an auth system — see data/auth.py
+(the `users` table backs login); this is the calling-team roster. Guarded at
+quality_manager (or higher), since managing the team is a manager task.
 """
 import logging
 
@@ -14,8 +11,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.data.auth import require_role
 from app.data.db import get_db
-from app.data.models import Agent
+from app.data.models import Agent, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -36,7 +34,11 @@ def _agent_dict(agent: Agent) -> dict:
 
 
 @router.post("", status_code=201)
-def create_agent(body: CreateAgentRequest, db: Session = Depends(get_db)) -> dict:
+def create_agent(
+    body: CreateAgentRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("quality_manager")),
+) -> dict:
     """Add an agent to the roster."""
     existing = db.execute(select(Agent).where(Agent.email == body.email)).scalar_one_or_none()
     if existing is not None:
@@ -50,14 +52,21 @@ def create_agent(body: CreateAgentRequest, db: Session = Depends(get_db)) -> dic
 
 
 @router.get("")
-def list_agents(db: Session = Depends(get_db)) -> list[dict]:
+def list_agents(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("quality_manager")),
+) -> list[dict]:
     """List agents, newest first."""
     agents = db.execute(select(Agent).order_by(Agent.created_at.desc(), Agent.id.desc())).scalars().all()
     return [_agent_dict(a) for a in agents]
 
 
 @router.delete("/{agent_id}", status_code=204)
-def delete_agent(agent_id: int, db: Session = Depends(get_db)) -> None:
+def delete_agent(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("quality_manager")),
+) -> None:
     """Remove an agent from the roster."""
     agent = db.get(Agent, agent_id)
     if agent is None:

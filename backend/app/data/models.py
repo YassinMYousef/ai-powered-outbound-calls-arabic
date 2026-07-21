@@ -486,6 +486,45 @@ class FCRReport(Base):
     )
 
 
+class CallAudit(Base):
+    """One quality auditor's manual verdict on a completed call's AI outcome.
+
+    Backs the "Report Accuracy" success metric (requirements doc §5): a QA reviewer
+    samples finished calls and records the true outcome; accuracy is the fraction
+    where the AI's recorded `outcome` matched the auditor (data/reporting.report_accuracy).
+    One audit per call (unique), so re-auditing corrects rather than duplicates.
+    """
+
+    __tablename__ = "call_audits"
+    __table_args__ = (
+        UniqueConstraint("call_log_id", name="uq_call_audits_call_log"),
+        CheckConstraint(
+            "audited_outcome IN ('resolved', 'unresolved', 'transferred', 'unknown')",
+            name="ck_call_audits_audited_outcome",
+        ),
+        Index("ix_call_audits_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    call_log_id: Mapped[int] = mapped_column(
+        ForeignKey("call_logs.id", ondelete="CASCADE"), index=True
+    )
+    # The outcome the AI had recorded when the audit was taken — snapshotted so the
+    # accuracy metric is stable even if the CallLog is later edited.
+    ai_outcome: Mapped[str | None] = mapped_column(String(32))
+    # The auditor's ground-truth verdict for what the outcome should have been.
+    audited_outcome: Mapped[str] = mapped_column(String(32))
+    # True iff ai_outcome == audited_outcome (computed at submit time).
+    is_accurate: Mapped[bool] = mapped_column(Boolean)
+    note: Mapped[str | None] = mapped_column(Text)
+    audited_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class AuditLog(Base):
     """Access audit trail — KB content is proprietary, so reads get logged too."""
 

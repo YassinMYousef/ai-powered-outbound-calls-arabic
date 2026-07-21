@@ -2,9 +2,8 @@
 
 Module: Telephony & Call Orchestration, persistence via Backend/Data.
 
-TODO(auth): guard with data/auth.require_role once OAuth2/RBAC lands — this
-dials real, billed calls and is currently unauthenticated, same gap noted in
-api/chat.py and api/kb.py.
+These dial real, billed calls, so every route requires an authenticated agent
+(or higher) and the dialing actions are audit-logged.
 """
 import logging
 
@@ -13,8 +12,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.data import audit
+from app.data.auth import require_role
 from app.data.db import get_db
-from app.data.models import CallLog
+from app.data.models import CallLog, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -65,7 +66,11 @@ def _call_dict(call: CallLog) -> dict:
 
 
 @router.post("", status_code=202)
-def create_call(body: CreateCallRequest, db: Session = Depends(get_db)) -> dict:
+def create_call(
+    body: CreateCallRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("agent")),
+) -> dict:
     """Log one customer for an outbound call and dial it now.
 
     This dials a real number and bills the configured Twilio account
@@ -77,18 +82,25 @@ def create_call(body: CreateCallRequest, db: Session = Depends(get_db)) -> dict:
     db.commit()
     db.refresh(call)
     _enqueue_dial(call.id)
+    audit.record(
+        db, user_id=user.id, action="call.create", resource_type="call_log",
+        resource_id=call.id, detail={"ticket_id": body.ticket_id},
+    )
     return {"id": call.id, "customer_phone": call.customer_phone, "ticket_id": call.ticket_id, "status": call.status}
 
 
 @router.get("")
-def list_calls(db: Session = Depends(get_db)) -> list[dict]:
+def list_calls(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("agent")),
+) -> list[dict]:
     """List every CallLog row, newest first — the agent's Call Queue."""
     calls = db.execute(select(CallLog).order_by(CallLog.created_at.desc(), CallLog.id.desc())).scalars().all()
     return [_call_dict(c) for c in calls]
 
 
 @router.post("/schedule", status_code=202)
-def schedule_follow_up_batch() -> dict:
+def schedule_follow_up_batch(user: User = Depends(require_role("agent"))) -> dict:
     """Enqueue every CallLog row still sitting at status == 'queued'.
 
     Delegates to app/workers/tasks.py::schedule_follow_up_batch.
@@ -98,7 +110,11 @@ def schedule_follow_up_batch() -> dict:
 
 
 @router.post("/{call_id}/dial", status_code=202)
-def dial_call(call_id: int, db: Session = Depends(get_db)) -> dict:
+def dial_call(
+    call_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("agent")),
+) -> dict:
     """Dial one existing queued row now — the Call Queue's per-row "Start call".
 
     This dials a real number and bills the configured Twilio account — only
@@ -112,11 +128,18 @@ def dial_call(call_id: int, db: Session = Depends(get_db)) -> dict:
     if call.status != "queued":
         raise HTTPException(status_code=409, detail=f"call {call_id} is not queued (status={call.status})")
     _enqueue_dial(call.id)
+    audit.record(
+        db, user_id=user.id, action="call.dial", resource_type="call_log", resource_id=call.id,
+    )
     return {"id": call.id, "status": call.status}
 
 
 @router.get("/{call_id}")
-def get_call(call_id: int, db: Session = Depends(get_db)) -> dict:
+def get_call(
+    call_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("agent")),
+) -> dict:
     """Return the logged outcome, duration, and transcript for one call."""
     call = db.get(CallLog, call_id)
     if call is None:

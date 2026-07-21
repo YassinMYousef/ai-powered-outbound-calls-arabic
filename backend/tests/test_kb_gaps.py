@@ -76,6 +76,23 @@ def test_list_gaps_ranks_by_hit_count(db_session) -> None:
     assert groups[0]["normalized_query"] == "منتج متكرر"
 
 
+def test_list_gaps_ranks_by_priority_not_just_count(db_session) -> None:
+    # A frequently-asked but merely low-confidence gap vs a rarer total miss:
+    # 3 * 0.6 = 1.8 (low_confidence) < 2 * 1.0 = 2.0 (no_match) → the miss ranks first.
+    for _ in range(3):
+        _record(db_session, "سؤال ضعيف الثقة", reason="low_confidence")
+    for _ in range(2):
+        _record(db_session, "سؤال بلا نتائج", reason="no_match")
+
+    groups = kb_gaps.list_gaps(db_session)
+    assert [g["normalized_query"] for g in groups] == [
+        kb_gaps._normalize("سؤال بلا نتائج"),
+        kb_gaps._normalize("سؤال ضعيف الثقة"),
+    ]
+    assert groups[0]["priority"] == 2.0
+    assert groups[1]["priority"] == 1.8
+
+
 def test_list_gaps_reports_the_most_common_reason(db_session) -> None:
     _record(db_session, "منتج", reason="no_match")
     _record(db_session, "منتج", reason="no_match")
@@ -171,3 +188,46 @@ def test_resolve_endpoint_rejects_a_non_resolvable_status(client) -> None:
         "/api/kb/gaps/resolve", json={"normalized_query": "منتج", "status": "open"}
     )
     assert res.status_code == 422
+
+
+# --- recheck / close-the-loop -----------------------------------------------
+
+
+def _fake_retrieve_by_keyword(monkeypatch, covered_keyword: str, high=0.95, low=0.2):
+    """Stub retrieval: queries containing `covered_keyword` look well-covered."""
+    from app.conversation.rag import retrieve as retrieve_mod
+
+    def fake_retrieve(query, k, vector=None, diagnostics=None):
+        if diagnostics is not None:
+            diagnostics["top_similarity"] = high if covered_keyword in query else low
+        return []
+
+    monkeypatch.setattr(retrieve_mod, "retrieve", fake_retrieve)
+
+
+def test_recheck_auto_resolves_only_now_covered_gaps(db_session, monkeypatch) -> None:
+    _record(db_session, "سؤال مغطى الان")
+    _record(db_session, "سؤال لسه ناقص")
+    _fake_retrieve_by_keyword(monkeypatch, "مغطى")
+
+    resolved = kb_gaps.recheck_open_gaps(db_session)
+
+    assert resolved == 1
+    open_groups = [g["normalized_query"] for g in kb_gaps.list_gaps(db_session, status="open")]
+    assert open_groups == [kb_gaps._normalize("سؤال لسه ناقص")]
+    # The closed one carries the auto-resolution note.
+    resolved_row = (
+        db_session.query(UnansweredQuestion)
+        .filter(UnansweredQuestion.status == "resolved")
+        .one()
+    )
+    assert "auto-resolved" in resolved_row.resolution_note
+
+
+def test_recheck_endpoint_requires_admin_and_returns_count(client, db_session, monkeypatch) -> None:
+    _record(db_session, "سؤال مغطى الان")
+    _fake_retrieve_by_keyword(monkeypatch, "مغطى")
+
+    res = client.post("/api/kb/gaps/recheck")
+    assert res.status_code == 200
+    assert res.json() == {"resolved": 1}

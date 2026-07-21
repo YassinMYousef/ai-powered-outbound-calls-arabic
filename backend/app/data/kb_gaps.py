@@ -27,6 +27,16 @@ GAP_REASONS = frozenset({"no_match", "no_citation", "low_confidence"})
 # The states an open gap can be moved to from the review UI.
 RESOLVABLE_STATUSES = frozenset({"resolved", "dismissed"})
 
+# How badly each verdict missed, for the priority score: nothing retrieved at all
+# is a worse gap than an answer that was merely low-confidence.
+_REASON_WEIGHT = {"no_match": 1.0, "no_citation": 0.8, "low_confidence": 0.6}
+
+
+def _priority(count: int, reasons: "Counter") -> float:
+    """Impact score for ranking: frequency weighted by worst miss severity."""
+    worst = max((_REASON_WEIGHT.get(r, 0.5) for r in reasons), default=0.5)
+    return round(count * worst, 3)
+
 
 def _normalize(query: str) -> str:
     """The grouping key: Arabic-normalized tokens joined back into a string."""
@@ -105,9 +115,11 @@ def list_gaps(db: Session, status: str = "open", limit: int = 50) -> list[dict]:
             group["first_seen"] = row.created_at
 
     # groups.values() is already newest-first (dicts keep insertion order, and rows
-    # were fetched newest-first). A stable sort by count keeps that recency order as
-    # the tiebreak — no datetime comparison, so naive/aware mixing can't bite.
-    ordered = sorted(groups.values(), key=lambda g: g["count"], reverse=True)
+    # were fetched newest-first). A stable sort by priority keeps that recency order
+    # as the tiebreak — no datetime comparison, so naive/aware mixing can't bite.
+    ordered = sorted(
+        groups.values(), key=lambda g: _priority(g["count"], g["reasons"]), reverse=True
+    )
     return [_serialize(group) for group in ordered[:limit]]
 
 
@@ -117,6 +129,7 @@ def _serialize(group: dict) -> dict:
         "normalized_query": group["normalized_query"],
         "sample_query": group["sample_query"],
         "count": group["count"],
+        "priority": _priority(group["count"], reasons),
         "reason": reasons.most_common(1)[0][0],
         "reasons": dict(reasons),
         "top_similarity": group["top_similarity"],
@@ -153,3 +166,39 @@ def resolve(
     )
     db.commit()
     return result.rowcount
+
+
+_AUTO_RESOLVE_NOTE = "auto-resolved: the KB now covers this after ingestion"
+
+
+def recheck_open_gaps(db: Session, *, min_similarity: float | None = None) -> int:
+    """Re-run retrieval for each open gap and auto-resolve those the KB now covers.
+
+    The close-the-loop step: once new documents are ingested, a gap whose best
+    passage now clears `rag_gap_min_similarity` (the same dense-cosine floor
+    answer._coverage uses) is marked resolved with a note, so admins only ever see
+    gaps that are still genuinely unfilled. Returns the number of gap groups closed.
+
+    Retrieval-only (no LLM call) — cheap enough to run after every nightly ingest.
+    A retrieval error on one gap is skipped, never aborting the sweep.
+    """
+    from app.conversation.rag import retrieve
+
+    threshold = settings.rag_gap_min_similarity if min_similarity is None else min_similarity
+    resolved_groups = 0
+    for group in list_gaps(db, status="open", limit=10_000):
+        diagnostics: dict = {}
+        try:
+            retrieve.retrieve(group["sample_query"], settings.rag_top_k, diagnostics=diagnostics)
+        except Exception:
+            continue
+        top_similarity = diagnostics.get("top_similarity")
+        if top_similarity is not None and top_similarity >= threshold:
+            resolve(
+                db,
+                normalized_query=group["normalized_query"],
+                status="resolved",
+                note=_AUTO_RESOLVE_NOTE,
+            )
+            resolved_groups += 1
+    return resolved_groups

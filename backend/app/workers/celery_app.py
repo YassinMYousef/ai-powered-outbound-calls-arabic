@@ -16,4 +16,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.workers.tasks.ingest_kb_documents",
         "schedule": crontab(hour=3, minute=0),
     },
+    # Compiles the prior week's "First Call Resolutions" report for the quality
+    # team every morning (idempotent per whole-day window).
+    "nightly-fcr-report": {
+        "task": "app.workers.tasks.generate_fcr_report",
+        "schedule": crontab(hour=4, minute=0),
+    },
 }

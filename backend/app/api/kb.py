@@ -12,9 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.conversation.rag.extract import extract_text
-from app.data import kb_gaps
+from app.data import audit, kb_gaps
+from app.data.auth import require_role
 from app.data.db import get_db
-from app.data.models import KBDocument
+from app.data.models import KBDocument, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,8 +35,12 @@ def _enqueue_ingest(doc_id: int) -> None:
 
 
 @router.post("/documents", status_code=202)
-def upload_document(file: UploadFile, db: Session = Depends(get_db)) -> dict:
-    """Store a KB document (txt/md/pdf/docx) and enqueue embedding."""
+def upload_document(
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("admin")),
+) -> dict:
+    """Store a KB document (txt/md/pdf/docx) and enqueue embedding. Admin only."""
     filename = file.filename or ""
     try:
         text = extract_text(file.file.read(), filename)
@@ -49,11 +54,18 @@ def upload_document(file: UploadFile, db: Session = Depends(get_db)) -> dict:
     db.commit()
     db.refresh(doc)
     _enqueue_ingest(doc.id)
+    audit.record(
+        db, user_id=user.id, action="kb.upload", resource_type="kb_document",
+        resource_id=doc.id, detail={"title": doc.title},
+    )
     return {"id": doc.id, "title": doc.title, "status": "pending_embedding"}
 
 
 @router.get("/documents")
-def list_documents(db: Session = Depends(get_db)) -> list[dict]:
+def list_documents(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("quality_manager")),
+) -> list[dict]:
     """List KB documents with their last-embedded timestamps (knowledge coverage KPI)."""
     docs = (
         db.execute(select(KBDocument).order_by(KBDocument.created_at.desc(), KBDocument.id.desc()))
@@ -89,27 +101,55 @@ def list_gaps(
     status: str = Query(default="open", pattern="^(open|resolved|dismissed)$"),
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
+    user: User = Depends(require_role("quality_manager")),
 ) -> list[dict]:
-    """Unanswered questions grouped by normalized text, most-hit first.
+    """Unanswered questions grouped by normalized text, ranked by impact.
 
     Each group carries a `count` (how often it was asked), the latest wording, the
-    gap `reason`, and last-seen — so admins fill the highest-impact gaps first.
-
-    TODO(auth): guard with data/auth.require_role("admin") once OAuth2/RBAC lands.
+    gap `reason`, a `priority` score, and last-seen — so admins fill the
+    highest-impact gaps first. Quality-manager (or higher) only.
     """
     return kb_gaps.list_gaps(db, status=status, limit=limit)
 
 
 @router.post("/gaps/resolve")
-def resolve_gap(body: GapResolution, db: Session = Depends(get_db)) -> dict:
+def resolve_gap(
+    body: GapResolution,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("quality_manager")),
+) -> dict:
     """Mark every open gap sharing this normalized_query resolved or dismissed.
 
     Returns {"updated": n}. If the gap recurs later it opens a fresh row, so a
-    resolved-but-still-missing topic resurfaces on its own.
-
-    TODO(auth): guard with data/auth.require_role("admin") once OAuth2/RBAC lands.
+    resolved-but-still-missing topic resurfaces on its own. Quality-manager only.
     """
     updated = kb_gaps.resolve(
-        db, normalized_query=body.normalized_query, status=body.status, note=body.note
+        db,
+        normalized_query=body.normalized_query,
+        status=body.status,
+        note=body.note,
+        user_id=user.id,
+    )
+    audit.record(
+        db, user_id=user.id, action="kb.gap.resolve", resource_type="kb_gap",
+        resource_id=body.normalized_query, detail={"status": body.status, "updated": updated},
     )
     return {"updated": updated}
+
+
+@router.post("/gaps/recheck")
+def recheck_gaps(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("admin")),
+) -> dict:
+    """Re-run retrieval over every open gap and auto-resolve those the KB now covers.
+
+    The manual trigger for the close-the-loop sweep that also runs after each
+    nightly ingest — use it right after uploading the doc that fills a gap.
+    Returns {"resolved": n}. Admin only (it touches the embedding backend).
+    """
+    resolved = kb_gaps.recheck_open_gaps(db)
+    audit.record(
+        db, user_id=user.id, action="kb.gap.recheck", detail={"resolved": resolved},
+    )
+    return {"resolved": resolved}

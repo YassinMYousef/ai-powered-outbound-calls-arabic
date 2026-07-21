@@ -81,11 +81,32 @@ def ingest_kb_documents() -> int:
                 ingest.ingest_document(doc_id, db=db)
                 processed += 1
             except Exception:
+                db.rollback()  # clear the failed txn so the rest of the batch survives
                 logger.exception("KB ingest failed for doc %s — continuing batch", doc_id)
+        if processed:
+            # Close the loop: gaps the freshly-ingested docs now cover are auto-resolved.
+            try:
+                from app.data import kb_gaps
+
+                closed = kb_gaps.recheck_open_gaps(db)
+                logger.info("nightly ingest: auto-resolved %d KB gap(s) now covered", closed)
+            except Exception:
+                db.rollback()
+                logger.exception("KB gap recheck after ingest failed")
     return processed
 
 
 @celery_app.task
-def generate_fcr_report() -> None:
-    """Compile the 'First Call Resolutions' report (data.reporting)."""
-    raise NotImplementedError
+def generate_fcr_report(days: int = 7) -> int:
+    """Compile and persist the 'First Call Resolutions' report for the last `days`.
+
+    Idempotent per whole-day window — the nightly run refreshes one FCRReport row.
+    Returns the report id.
+    """
+    from app.data import reporting
+    from app.data.db import SessionLocal
+
+    with SessionLocal() as db:
+        report = reporting.generate_recent_fcr_report(db, days=days)
+        logger.info("generate_fcr_report: report_id=%s fcr_rate=%s", report.id, report.fcr_rate)
+        return report.id

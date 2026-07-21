@@ -27,6 +27,7 @@ def test_all_product_tables_are_registered() -> None:
         "rag_query_cache",
         "customers",
         "unanswered_questions",
+        "call_audits",
     }
 
 

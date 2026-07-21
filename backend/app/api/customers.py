@@ -15,8 +15,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.data.auth import require_role
 from app.data.db import get_db
-from app.data.models import CallLog, Customer
+from app.data.models import CallLog, Customer, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -43,7 +44,11 @@ def _customer_dict(customer: Customer) -> dict:
 
 
 @router.post("", status_code=201)
-def create_customer(body: CreateCustomerRequest, db: Session = Depends(get_db)) -> dict:
+def create_customer(
+    body: CreateCustomerRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("agent")),
+) -> dict:
     """Add a customer to the CRM."""
     existing = db.execute(select(Customer).where(Customer.phone == body.phone)).scalar_one_or_none()
     if existing is not None:
@@ -57,7 +62,10 @@ def create_customer(body: CreateCustomerRequest, db: Session = Depends(get_db)) 
 
 
 @router.get("")
-def list_customers(db: Session = Depends(get_db)) -> list[dict]:
+def list_customers(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("agent")),
+) -> list[dict]:
     """List CRM customers, newest first."""
     customers = (
         db.execute(select(Customer).order_by(Customer.created_at.desc(), Customer.id.desc()))
@@ -68,7 +76,11 @@ def list_customers(db: Session = Depends(get_db)) -> list[dict]:
 
 
 @router.get("/{customer_id}")
-def get_customer(customer_id: int, db: Session = Depends(get_db)) -> dict:
+def get_customer(
+    customer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("agent")),
+) -> dict:
     """One customer plus their outbound-call history."""
     customer = db.get(Customer, customer_id)
     if customer is None:
@@ -95,7 +107,11 @@ def get_customer(customer_id: int, db: Session = Depends(get_db)) -> dict:
 
 
 @router.delete("/{customer_id}", status_code=204)
-def delete_customer(customer_id: int, db: Session = Depends(get_db)) -> None:
+def delete_customer(
+    customer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("quality_manager")),
+) -> None:
     """Remove a customer from the CRM.
 
     Their past CallLog rows are kept (CallLog.customer_id is ON DELETE SET
@@ -109,7 +125,12 @@ def delete_customer(customer_id: int, db: Session = Depends(get_db)) -> None:
 
 
 @router.post("/{customer_id}/flag", status_code=201)
-def flag_for_follow_up(customer_id: int, body: FlagForFollowUpRequest, db: Session = Depends(get_db)) -> dict:
+def flag_for_follow_up(
+    customer_id: int,
+    body: FlagForFollowUpRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("agent")),
+) -> dict:
     """Flag a customer for an outbound follow-up call.
 
     Creates a queued CallLog row linked to this customer — the flag IS the

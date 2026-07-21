@@ -11,13 +11,14 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from redis.exceptions import RedisError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from twilio.twiml.voice_response import VoiceResponse
 
 from app.config import settings
 from app.conversation.dialog import Action, DialogState, classify_intent, next_action
 from app.data.db import get_db
-from app.data.models import CallLog
+from app.data.models import CallLog, FollowUpTicket
 from app.speech import audio, stt, tts
 from app.speech.greeting import GreetingContext, greeting_text
 from app.speech.replies import (
@@ -54,8 +55,30 @@ def _load_call(db: Session, call_id: int | None) -> CallLog | None:
     return call
 
 
-def _greeting_ctx(call: CallLog | None) -> GreetingContext:
-    return GreetingContext(ticket_id=call.ticket_id if call else None)
+def _greeting_ctx(db: Session, call: CallLog | None) -> GreetingContext:
+    """Build the greeting context, pulling the prior inbound call's details.
+
+    The dynamic follow-up question ("did you complete <procedure>?") is the whole
+    point of the product: we resolve it from the FollowUpTicket the CRM left,
+    matched by value on ticket_id (crm_ticket_id). Name falls back to the linked
+    customer record; every field degrades gracefully to the generic script.
+    """
+    if call is None:
+        return GreetingContext()
+    procedure: str | None = None
+    customer_name: str | None = None
+    if call.ticket_id:
+        ticket = db.execute(
+            select(FollowUpTicket).where(FollowUpTicket.crm_ticket_id == call.ticket_id)
+        ).scalar_one_or_none()
+        if ticket is not None:
+            procedure = ticket.procedure
+            customer_name = ticket.customer_name
+    if customer_name is None and call.customer is not None:
+        customer_name = call.customer.name
+    return GreetingContext(
+        ticket_id=call.ticket_id, procedure=procedure, customer_name=customer_name
+    )
 
 
 def _say_or_play(response: VoiceResponse, text_ar: str) -> None:
@@ -105,7 +128,7 @@ def voice(call_id: int | None = None, db: Session = Depends(get_db)) -> Response
     """Play a dynamic Arabic greeting, then record the customer's first turn."""
     call = _load_call(db, call_id)
     response = VoiceResponse()
-    _say_or_play(response, greeting_text(_greeting_ctx(call)))
+    _say_or_play(response, greeting_text(_greeting_ctx(db, call)))
     _record_turn(response, call_id, 0)
     return _twiml(response)
 
@@ -152,7 +175,7 @@ def gather(
         _say_or_play(response, OFFER_HELP_AR)
         _record_turn(response, call_id, turn + 1)
     elif action is Action.REPEAT_QUESTION:
-        _say_or_play(response, repeat_question_text(_greeting_ctx(call)))
+        _say_or_play(response, repeat_question_text(_greeting_ctx(db, call)))
         _record_turn(response, call_id, turn + 1)
     elif action is Action.TRANSFER_TO_AGENT:
         if settings.human_agent_number:

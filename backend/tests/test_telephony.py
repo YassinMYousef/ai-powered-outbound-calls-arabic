@@ -72,6 +72,37 @@ def test_voice_falls_back_to_say_with_dynamic_ticket(
     assert "هل تم حل مشكلتك بنجاح؟" in response.text
 
 
+def test_voice_greeting_uses_follow_up_ticket_procedure(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch,
+) -> None:
+    from app.data.models import FollowUpTicket
+
+    call = _seed_call(db_session, ticket_id="TICKET-9")
+    db_session.add(
+        FollowUpTicket(
+            crm_ticket_id="TICKET-9",
+            customer_phone="+201000000000",
+            customer_name="سارة",
+            procedure="إعادة ضبط الراوتر",
+        )
+    )
+    db_session.commit()
+
+    def fail_store(text_ar: str) -> str:
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(audio_store, "store_text", fail_store)
+
+    body = client.post(f"/telephony/voice?call_id={call.id}").text
+    # Name and the procedure-specific question come from the CRM follow-up ticket.
+    assert "سارة" in body
+    assert "هل تمكّنت من إعادة ضبط الراوتر؟" in body
+    # ...NOT the generic fallback question.
+    assert "هل تم حل مشكلتك بنجاح؟" not in body
+
+
 def test_voice_without_call_id_produces_working_gather_action(client: TestClient) -> None:
     voice_response = client.post("/telephony/voice")
     root = ElementTree.fromstring(voice_response.text)
@@ -216,7 +247,7 @@ def test_gather_no_input_repeats_question(
     response = client.post(f"/telephony/gather?call_id={call.id}&turn=0")
 
     assert response.status_code == 200
-    assert spoken == [repeat_question_text(webhooks._greeting_ctx(call))]
+    assert spoken == [repeat_question_text(webhooks._greeting_ctx(db_session, call))]
     assert (
         f'action="/telephony/gather?call_id={call.id}&amp;turn=1"'
         in response.text

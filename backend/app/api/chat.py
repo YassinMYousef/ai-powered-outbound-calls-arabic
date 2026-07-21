@@ -16,8 +16,10 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.conversation import memory
 from app.conversation.rag import answer as answer_module
-from app.data import kb_gaps
+from app.data import audit, kb_gaps
+from app.data.auth import require_role
 from app.data.db import get_db
+from app.data.models import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,7 +32,11 @@ class ChatQuery(BaseModel):
 
 
 @router.post("/query")
-def query(body: ChatQuery, db: Session = Depends(get_db)) -> dict:
+def query(
+    body: ChatQuery,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role("agent")),
+) -> dict:
     """Return {"session_id", "answer", "sources"} from the internal KB.
 
     Send the returned session_id with follow-up questions to continue the
@@ -38,9 +44,8 @@ def query(body: ChatQuery, db: Session = Depends(get_db)) -> dict:
     fresh). An empty "sources" list means the KB did not cover the question —
     the answer is a "not covered" notice, not a fact.
 
-    TODO(auth): guard with data/auth.require_role once OAuth2/RBAC lands (Person D,
-    Sprint 3) — KB content is proprietary and this route exposes it unauthenticated.
-    Sessions stay anonymous (user_id NULL) until then.
+    Requires an authenticated agent (or higher); every query is audit-logged
+    because it reads proprietary KB content.
     """
     if body.session_id is not None:
         session = memory.get_session(db, body.session_id)
@@ -50,6 +55,7 @@ def query(body: ChatQuery, db: Session = Depends(get_db)) -> dict:
     else:
         session = memory.create_session(db)  # flushed, only committed with a successful turn
         history = []
+    session.user_id = user.id  # tie the conversation to the authenticated agent
 
     started = time.perf_counter()
     diagnostics: dict = {}
@@ -83,4 +89,12 @@ def query(body: ChatQuery, db: Session = Depends(get_db)) -> dict:
             session_id=session.id,
         )
     memory.append_turn(db, session, body.query, result, latency_ms)
+    audit.record(
+        db,
+        user_id=user.id,
+        action="chat.query",
+        resource_type="chat_session",
+        resource_id=session.id,
+        detail={"coverage": coverage, "sources": len(result.get("sources", []))},
+    )
     return {"session_id": session.id, **result}

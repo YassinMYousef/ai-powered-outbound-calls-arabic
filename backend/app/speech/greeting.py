@@ -8,7 +8,8 @@ it through tts.synthesize.
 The text is kept here — not in telephony — because it is the Speech module's
 job to shape what the voice actually says; telephony just plays the bytes.
 Digits (ticket IDs) are left as digits on purpose: ElevenLabs text
-normalization reads them out naturally, which is exactly why it's enabled.
+normalization voices them (requires ELEVENLABS_TEXT_NORMALIZATION=on — with
+"auto" ElevenLabs tends to skip Arabic and reads digits wrong).
 """
 from dataclasses import dataclass
 

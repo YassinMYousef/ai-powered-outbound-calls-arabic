@@ -8,9 +8,13 @@ def test_nightly_kb_ingest_is_scheduled() -> None:
 
 
 def test_nightly_batch_survives_one_bad_document(monkeypatch) -> None:
+    class _FakeSession:
+        def rollback(self) -> None:  # the batch rolls back a failed doc's txn
+            pass
+
     class _FakeSessionContext:
         def __enter__(self):
-            return object()
+            return _FakeSession()
 
         def __exit__(self, *exc):
             return False
@@ -26,6 +30,8 @@ def test_nightly_batch_survives_one_bad_document(monkeypatch) -> None:
     monkeypatch.setattr("app.data.db.SessionLocal", lambda: _FakeSessionContext())
     monkeypatch.setattr("app.conversation.rag.ingest.docs_needing_embedding", lambda db: [1, 2, 3])
     monkeypatch.setattr("app.conversation.rag.ingest.ingest_document", fake_ingest)
+    # The post-ingest gap recheck needs retrieval/DB — out of scope for this unit.
+    monkeypatch.setattr("app.data.kb_gaps.recheck_open_gaps", lambda db: 0)
 
     # Call the task body directly — no broker needed.
     assert ingest_kb_documents() == 2

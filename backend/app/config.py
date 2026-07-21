@@ -55,8 +55,10 @@ class Settings(BaseSettings):
     # to get Twilio-ready audio straight from the API and skip speech/audio.py.
     elevenlabs_output_format: str = "mp3_44100_128"
     # Text normalization — spells out numbers/dates/currency so ticket IDs and
-    # amounts in the greeting are read naturally. auto | on | off.
-    elevenlabs_text_normalization: str = "auto"
+    # amounts in the greeting are read naturally. auto | on | off. Use "on":
+    # with "auto" ElevenLabs skips normalizing Arabic and misreads digits.
+    # "on" needs a full model (Enterprise-only on turbo/flash v2.5).
+    elevenlabs_text_normalization: str = "on"
     # Custom pronunciation dictionary (proper nouns, product/plan names). Both IDs
     # required to activate; leave blank to send no locator.
     elevenlabs_pronunciation_dictionary_id: str = ""
@@ -143,9 +145,12 @@ class Settings(BaseSettings):
     telephony_audio_ttl_seconds: int = 600
     tts_cache_ttl_seconds: int = 86400
 
-    # Auth
+    # Auth (OAuth2 password flow + JWT bearer tokens; RBAC in data/auth.py).
+    # jwt_secret MUST be overridden in every non-dev environment — the app refuses
+    # to issue tokens while it is still the default (see data/auth.py).
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 720  # 12h — a call-center shift
 
 
 settings = Settings()

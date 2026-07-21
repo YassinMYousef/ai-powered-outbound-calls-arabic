@@ -37,7 +37,9 @@ speculating — a wrong answer to an agent on a live call is worse than no answe
 themselves. Give them the procedure, not customer-facing pleasantries.
 - State each fact exactly once. Do not restate or paraphrase a step you have already \
 written — write the sentence once, drawing it from the document.
-- Do not write source references inline; the system attaches the cited sources.
+- Ground every sentence in the supplied documents so the citation system can \
+attach the exact passages you relied on. Never write textual source references \
+like "(المصدر: ...)" yourself — only the attached citations name sources.
 - The conversation may span several turns. Earlier turns are context for \
 understanding the latest question only — ground every fact in the documents \
 supplied with the latest question, never in your own earlier answers."""
